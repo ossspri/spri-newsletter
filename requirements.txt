@@ -1,0 +1,23 @@
+# AI
+anthropic>=0.40.0
+
+# Google APIs
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# NotebookLM
+notebooklm-py>=0.1.0
+
+# Web UI
+flask>=3.0.0
+
+# Utilities
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+markdown>=3.5.0
+beautifulsoup4>=4.12.0
+
+# Testing
+pytest>=8.0.0

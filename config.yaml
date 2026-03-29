@@ -1,0 +1,48 @@
+# ── 뉴스 수집 ──
+gnews:
+  queries:
+    - "software industry AI"
+    - "AI regulation policy"
+    - "big tech AI strategy"
+    - "AI semiconductor GPU"
+    - "software developer AI"
+    - "AI research breakthrough"
+  lang: "en"
+  max_per_query: 50
+
+# ── 뉴스레터 ──
+newsletter:
+  max_articles: 25
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 4096
+
+# ── 이메일 수신자 ──
+recipients:
+  daily:
+    - "analyst1@spri.kr"
+    - "analyst2@spri.kr"
+  weekly:
+    - "director@spri.kr"
+    - "team-lead@spri.kr"
+
+# ── Google Drive ──
+drive:
+  folder_id: "YOUR_DRIVE_FOLDER_ID"
+
+# ── NotebookLM ──
+notebooklm:
+  notebook_prefix: "SPRi"
+
+# ── 스케줄 ──
+schedule:
+  daily_time: "06:00"
+
+# ── 웹 UI ──
+web_ui:
+  host: "127.0.0.1"
+  port: 5000
+
+# ── 로깅 ──
+logging:
+  level: "INFO"
+  file: "logs/spri.log"
