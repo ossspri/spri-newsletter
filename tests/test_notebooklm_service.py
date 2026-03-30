@@ -152,6 +152,9 @@ def _make_nlm_client_mock():
     new_nb.id = "nb_123"
     client.notebooks.create.return_value = new_nb
 
+    # sources.list → 빈 리스트 (기존 소스 없음)
+    client.sources.list.return_value = []
+
     # sources.add_url → Source mock
     source_mock = MagicMock()
     source_mock.id = "src_1"
@@ -314,6 +317,48 @@ class TestSaveSourcesAsync:
         calls = mock_nlm_client.sources.add_url.call_args_list
         assert calls[0][0] == ("nb_123", "https://example.com/1")
         assert calls[1][0] == ("nb_123", "https://example.com/2")
+
+
+    @patch("src.notebooklm_service.NotebookLMClient")
+    def test_skips_duplicate_url_sources(
+        self, mock_nlm_cls, mock_nlm_client
+    ):
+        """이미 추가된 URL 소스는 건너뛴다."""
+        self._patch_from_storage(mock_nlm_cls, mock_nlm_client)
+
+        # 첫 번째 기사 URL이 이미 소스로 존재
+        existing_source = MagicMock()
+        existing_source.url = "https://example.com/1"
+        existing_source.title = "Article 1"
+        mock_nlm_client.sources.list.return_value = [existing_source]
+
+        svc = NotebookLMService(SAMPLE_CONFIG)
+        asyncio.run(svc._save_sources_async("2026-03-29", SAMPLE_ARTICLES))
+
+        # 두 번째 기사만 add_url 호출
+        assert mock_nlm_client.sources.add_url.call_count == 1
+        mock_nlm_client.sources.add_url.assert_called_once_with(
+            "nb_123", "https://example.com/2"
+        )
+
+    @patch("src.notebooklm_service.NotebookLMClient")
+    def test_skips_duplicate_text_source(
+        self, mock_nlm_cls, mock_nlm_client
+    ):
+        """이미 추가된 뉴스레터 본문 소스는 건너뛴다."""
+        self._patch_from_storage(mock_nlm_cls, mock_nlm_client)
+
+        existing_text = MagicMock()
+        existing_text.url = None
+        existing_text.title = "Daily_브리핑_2026-03-29"
+        mock_nlm_client.sources.list.return_value = [existing_text]
+
+        svc = NotebookLMService(SAMPLE_CONFIG)
+        asyncio.run(
+            svc._save_sources_async("2026-03-29", SAMPLE_ARTICLES, SAMPLE_MARKDOWN)
+        )
+
+        mock_nlm_client.sources.add_text.assert_not_called()
 
 
 class TestSaveSources:

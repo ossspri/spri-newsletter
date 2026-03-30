@@ -85,8 +85,16 @@ class NotebookLMService:
                 client, notebook_title
             )
 
+            # 기존 소스 URL/제목 조회 (중복 방지)
+            existing_sources = await client.sources.list(notebook_id)
+            existing_urls = {s.url for s in existing_sources if s.url}
+            existing_titles = {s.title for s in existing_sources if s.title}
+
             # 기사 URL 소스 추가
             for article in articles:
+                if article["url"] in existing_urls:
+                    logger.info("소스 중복 건너뜀: %s", article["url"])
+                    continue
                 try:
                     await client.sources.add_url(
                         notebook_id, article["url"]
@@ -102,14 +110,17 @@ class NotebookLMService:
 
             # (선택) 뉴스레터 본문을 텍스트 소스로 추가
             if newsletter_markdown:
-                try:
-                    source_title = f"Daily_브리핑_{date_str}"
-                    await client.sources.add_text(
-                        notebook_id, source_title, newsletter_markdown
-                    )
-                    logger.info("뉴스레터 본문 소스 추가: %s", source_title)
-                except Exception as e:
-                    logger.warning("본문 소스 추가 실패: %s", e)
+                source_title = f"Daily_브리핑_{date_str}"
+                if source_title in existing_titles:
+                    logger.info("본문 소스 중복 건너뜀: %s", source_title)
+                else:
+                    try:
+                        await client.sources.add_text(
+                            notebook_id, source_title, newsletter_markdown
+                        )
+                        logger.info("뉴스레터 본문 소스 추가: %s", source_title)
+                    except Exception as e:
+                        logger.warning("본문 소스 추가 실패: %s", e)
 
         logger.info("NotebookLM 저장 완료: notebook_id=%s", notebook_id)
         return notebook_id
