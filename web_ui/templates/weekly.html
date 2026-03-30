@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% set active_tab = "weekly" %}
+
+{% block content %}
+<div class="page-header">
+  <h2>주간 SW 산업 동향 보고서</h2>
+</div>
+
+<!-- Step 1: 기사 선택 -->
+<section class="card">
+  <div class="card-header">
+    <h3>① 기사 선택</h3>
+    <div class="selection-controls">
+      <span id="selection-counter" class="counter">0/25 선택</span>
+      <button class="btn btn-small" onclick="selectAll()">전체 선택</button>
+      <button class="btn btn-small" onclick="deselectAll()">전체 해제</button>
+    </div>
+  </div>
+
+  <div id="warning-25" class="alert alert-warning hidden">25건 초과 선택. 최대 25건까지 권장됩니다.</div>
+
+  <!-- 날짜별 그룹 -->
+  {% for date_key, day_articles in grouped_articles|dictsort(reverse=true) %}
+  <div class="date-group">
+    <h4 class="date-label">{{ date_key }}</h4>
+    {% for a in day_articles %}
+    <div class="article-item selectable">
+      <label class="checkbox-label">
+        <input type="checkbox" class="article-check"
+               data-id="{{ a.id }}"
+               data-title="{{ a.title }}"
+               data-url="{{ a.url }}"
+               data-description="{{ a.description }}"
+               data-source="{{ a.source_name }}"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
+          <div class="article-meta">{{ a.source_name }} · {{ a.published_at[:10] }}</div>
+          <div class="article-desc">{{ a.description }}</div>
+        </div>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  <!-- 수동 기사 -->
+  {% if manual_articles %}
+  <div class="date-group">
+    <h4 class="date-label">수동 추가 기사</h4>
+    {% for a in manual_articles %}
+    <div class="article-item selectable">
+      <label class="checkbox-label">
+        <input type="checkbox" class="article-check"
+               data-id="manual-{{ a.id }}"
+               data-title="{{ a.title }}"
+               data-url="{{ a.url }}"
+               data-description="{{ a.description }}"
+               data-source="수동 추가"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
+          <div class="article-desc">{{ a.description }}</div>
+        </div>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 수동 기사 추가 -->
+  <div class="add-article-form">
+    <h4>수동 기사 추가</h4>
+    <div class="input-group">
+      <input type="url" id="manual-url" placeholder="https://..." class="input">
+      <button class="btn btn-secondary" onclick="addManualArticle()">추가</button>
+    </div>
+  </div>
+</section>
+
+<!-- Step 2: 보고서 생성 -->
+<section class="card">
+  <div class="card-header">
+    <h3>② 주간 보고서 생성</h3>
+    <button id="btn-generate-weekly" class="btn btn-primary" onclick="generateWeekly()">보고서 생성</button>
+  </div>
+  <div id="weekly-editor-section" class="hidden">
+    <label for="weekly-markdown-editor">마크다운 편집:</label>
+    <textarea id="weekly-markdown-editor" class="editor" rows="20"></textarea>
+    <button class="btn btn-secondary" onclick="refreshWeeklyPreview()">미리보기 갱신</button>
+  </div>
+</section>
+
+<!-- Step 3: 미리보기 + 발송 -->
+<section class="card">
+  <div class="card-header">
+    <h3>③ 미리보기 및 발송</h3>
+    <div class="btn-group">
+      <button id="btn-send-weekly" class="btn btn-success" onclick="sendWeekly()" disabled>이메일 발송</button>
+      <button id="btn-drive-weekly" class="btn btn-secondary" onclick="saveDriveWeekly()" disabled>Drive 저장</button>
+    </div>
+  </div>
+  <div id="weekly-preview-container" class="preview-frame">
+    <p class="empty-state">보고서를 생성하면 미리보기가 표시됩니다.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let weeklyMarkdown = '';
+
+  function getSelectedArticles() {
+    const checks = document.querySelectorAll('.article-check:checked');
+    return Array.from(checks).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.title,
+      url: cb.dataset.url,
+      description: cb.dataset.description,
+      source_name: cb.dataset.source,
+    }));
+  }
+
+  function updateCounter() {
+    const count = document.querySelectorAll('.article-check:checked').length;
+    document.getElementById('selection-counter').textContent = `${count}/25 선택`;
+    const warning = document.getElementById('warning-25');
+    if (count > 25) {
+      warning.classList.remove('hidden');
+    } else {
+      warning.classList.add('hidden');
+    }
+  }
+
+  function selectAll() {
+    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = true; });
+    updateCounter();
+  }
+
+  function deselectAll() {
+    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = false; });
+    updateCounter();
+  }
+
+  async function addManualArticle() {
+    const url = document.getElementById('manual-url').value.trim();
+    if (!url) return;
+    showLoading('URL 메타데이터를 추출 중...');
+    try {
+      await apiCall('/weekly/add-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      showToast('기사가 추가되었습니다.');
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function generateWeekly() {
+    const articles = getSelectedArticles();
+    if (articles.length === 0) {
+      showToast('기사를 선택하세요.', true);
+      return;
+    }
+    showLoading('Claude API로 주간 보고서를 생성 중입니다... (최대 1분 소요)');
+    try {
+      const data = await apiCall('/weekly/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          article_ids: articles.map(a => a.id),
+          articles: articles,
+        }),
+      });
+      weeklyMarkdown = data.markdown;
+      document.getElementById('weekly-markdown-editor').value = data.markdown;
+      document.getElementById('weekly-editor-section').classList.remove('hidden');
+      document.getElementById('weekly-preview-container').innerHTML =
+        '<iframe srcdoc="' + data.html_preview.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
+      document.getElementById('btn-send-weekly').disabled = false;
+      document.getElementById('btn-drive-weekly').disabled = false;
+      showToast('주간 보고서 생성 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function refreshWeeklyPreview() {
+    const md = document.getElementById('weekly-markdown-editor').value;
+    weeklyMarkdown = md;
+    try {
+      const data = await apiCall('/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md, type: 'weekly' }),
+      });
+      document.getElementById('weekly-preview-container').innerHTML =
+        '<iframe srcdoc="' + data.html.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function sendWeekly() {
+    const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
+    showLoading('이메일을 발송 중입니다...');
+    try {
+      const data = await apiCall('/weekly/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md }),
+      });
+      showToast(`이메일 발송 완료 (${data.recipients}명)`);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function saveDriveWeekly() {
+    const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
+    showLoading('Google Drive에 저장 중입니다...');
+    try {
+      const data = await apiCall('/weekly/save-drive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md }),
+      });
+      showToast(`Drive 저장 완료 (ID: ${data.doc_id})`);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+</script>
+{% endblock %}

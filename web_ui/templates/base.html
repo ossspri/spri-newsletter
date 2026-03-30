@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPRi 뉴스레터 관리</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1 class="logo">SPRi 뉴스레터 관리</h1>
+      <nav class="tabs">
+        <a href="{{ url_for('daily_page') }}" class="tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
+        <a href="{{ url_for('weekly_page') }}" class="tab {% if active_tab == 'weekly' %}active{% endif %}">Weekly</a>
+      </nav>
+    </div>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p id="loading-text">처리 중...</p>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    function showLoading(text) {
+      document.getElementById('loading-text').textContent = text || '처리 중...';
+      document.getElementById('loading-overlay').classList.remove('hidden');
+    }
+    function hideLoading() {
+      document.getElementById('loading-overlay').classList.add('hidden');
+    }
+    function showToast(msg, isError) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast' + (isError ? ' toast-error' : ' toast-success');
+      setTimeout(() => { el.className = 'toast hidden'; }, 4000);
+    }
+    async function apiCall(url, options) {
+      const resp = await fetch(url, options);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || '요청에 실패했습니다.');
+      }
+      return data;
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

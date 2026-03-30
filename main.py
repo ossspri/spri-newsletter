@@ -198,11 +198,17 @@ def run_fetch_only(config: dict, db_conn) -> None:
 
 
 def run_server(config: dict, db_conn) -> None:
-    """웹 UI 서버 시작 — Phase 6에서 완성."""
+    """웹 UI 서버 시작 (Flask)."""
+    from web_ui.app import create_app
+
     logger = logging.getLogger(__name__)
-    logger.info("웹 UI 서버 시작")
-    # TODO: Phase 6에서 Flask 앱 연동
-    logger.info("웹 UI 서버 (미구현)")
+    web_cfg = config.get("web_ui", {})
+    host = web_cfg.get("host", "127.0.0.1")
+    port = web_cfg.get("port", 5000)
+
+    app = create_app(config, db_conn)
+    logger.info("웹 UI 서버 시작: http://%s:%d", host, port)
+    app.run(host=host, port=port, debug=True)
 
 
 def _fallback_articles_markdown(articles: list[dict]) -> str:

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% set active_tab = "daily" %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Daily SW 산업 동향 브리핑</h2>
+  {% if sent_today %}
+  <span class="badge badge-success">오늘 발송 완료</span>
+  {% endif %}
+</div>
+
+<!-- Step 1: 뉴스 수집 -->
+<section class="card">
+  <div class="card-header">
+    <h3>① 뉴스 수집</h3>
+    <button id="btn-fetch" class="btn btn-primary" onclick="fetchNews()">뉴스 수집 (24h)</button>
+  </div>
+  <div id="articles-list" class="article-list">
+    {% if articles %}
+    {% for a in articles %}
+    <div class="article-item">
+      <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
+      <div class="article-meta">{{ a.source_name }} · {{ a.published_at[:10] }}</div>
+      <div class="article-desc">{{ a.description }}</div>
+    </div>
+    {% endfor %}
+    <p class="article-count">총 {{ articles|length }}건 수집됨</p>
+    {% else %}
+    <p class="empty-state">수집된 기사가 없습니다. "뉴스 수집" 버튼을 클릭하세요.</p>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Step 2: 뉴스레터 생성 -->
+<section class="card">
+  <div class="card-header">
+    <h3>② Daily 뉴스레터 생성</h3>
+    <button id="btn-generate" class="btn btn-primary" onclick="generateDaily()">뉴스레터 생성</button>
+  </div>
+  <div id="editor-section" class="hidden">
+    <label for="markdown-editor">마크다운 편집:</label>
+    <textarea id="markdown-editor" class="editor" rows="20"></textarea>
+    <button class="btn btn-secondary" onclick="refreshPreview()">미리보기 갱신</button>
+  </div>
+</section>
+
+<!-- Step 3: 미리보기 + 발송 -->
+<section class="card">
+  <div class="card-header">
+    <h3>③ 미리보기 및 발송</h3>
+    <div class="btn-group">
+      <button id="btn-send" class="btn btn-success" onclick="sendDaily()" disabled>이메일 발송</button>
+      <button id="btn-drive" class="btn btn-secondary" onclick="saveDrive()" disabled>Drive 저장</button>
+    </div>
+  </div>
+  <div id="preview-container" class="preview-frame">
+    <p class="empty-state">뉴스레터를 생성하면 미리보기가 표시됩니다.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentMarkdown = '';
+
+  async function fetchNews() {
+    showLoading('뉴스를 수집하고 있습니다...');
+    try {
+      const data = await apiCall('/daily/fetch', { method: 'POST' });
+      showToast(`${data.count}건 수집, ${data.inserted}건 신규 저장`);
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function generateDaily() {
+    showLoading('Claude API로 뉴스레터를 생성 중입니다... (최대 1분 소요)');
+    try {
+      const data = await apiCall('/daily/generate', { method: 'POST' });
+      currentMarkdown = data.markdown;
+      document.getElementById('markdown-editor').value = data.markdown;
+      document.getElementById('editor-section').classList.remove('hidden');
+      document.getElementById('preview-container').innerHTML =
+        '<iframe srcdoc="' + data.html_preview.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
+      document.getElementById('btn-send').disabled = false;
+      document.getElementById('btn-drive').disabled = false;
+      showToast('뉴스레터 생성 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function refreshPreview() {
+    const md = document.getElementById('markdown-editor').value;
+    currentMarkdown = md;
+    try {
+      const data = await apiCall('/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md, type: 'daily' }),
+      });
+      document.getElementById('preview-container').innerHTML =
+        '<iframe srcdoc="' + data.html.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function sendDaily() {
+    {% if sent_today %}
+    if (!confirm('오늘 이미 발송됨. 재발송하시겠습니까?')) return;
+    {% endif %}
+    const md = document.getElementById('markdown-editor').value || currentMarkdown;
+    showLoading('이메일을 발송 중입니다...');
+    try {
+      const data = await apiCall('/daily/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md }),
+      });
+      showToast(`이메일 발송 완료 (${data.recipients}명)`);
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function saveDrive() {
+    const md = document.getElementById('markdown-editor').value || currentMarkdown;
+    showLoading('Google Drive에 저장 중입니다...');
+    try {
+      const data = await apiCall('/daily/save-drive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md }),
+      });
+      showToast(`Drive 저장 완료 (ID: ${data.doc_id})`);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+</script>
+{% endblock %}
