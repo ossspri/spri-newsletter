@@ -23,6 +23,8 @@ from src.news_service import GNewsService
 from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
+from src.drive_service import DriveService
+from src.notebooklm_service import NotebookLMService
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -126,7 +128,32 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
         error_msg = f"Gmail 발송 실패: {e}"
         logger.error(error_msg)
 
-    # ── Step 8-9: Drive, NotebookLM (Phase 5에서 구현) ──
+    # ── Step 8: Google Drive API → 구글 문서 생성 ──
+    drive_doc_id = None
+    if send_status == "success":
+        try:
+            drive = DriveService(creds)
+            folder_id = config.get("drive", {}).get("folder_id", "")
+            drive_doc_id = drive.create_document(
+                markdown_body, "daily", date_str, folder_id
+            )
+            logger.info("Drive 문서 생성: %s", drive_doc_id)
+        except Exception as e:
+            logger.error("Drive 저장 실패 (파이프라인 계속): %s", e)
+
+    # ── Step 9: notebooklm-py → 기사 URL 저장 ──
+    nlm_notebook = None
+    if send_status == "success" and articles:
+        try:
+            nlm = NotebookLMService(config)
+            nlm_notebook = nlm.save_sources(
+                date_str,
+                [{"title": a["title"], "url": a["url"]} for a in articles],
+                markdown_body,
+            )
+            logger.info("NotebookLM 저장: %s", nlm_notebook)
+        except Exception as e:
+            logger.error("NotebookLM 저장 실패 (파이프라인 계속): %s", e)
 
     # ── Step 10: 발송 이력 기록 ──
     log_newsletter(
@@ -136,6 +163,8 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
         len(recipients),
         send_status,
         error_message=error_msg,
+        drive_doc_id=drive_doc_id,
+        nlm_notebook=nlm_notebook,
     )
 
     # ── Step 11: 로컬 백업 ──
@@ -144,7 +173,8 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
     # 아카이브 기사 저장
     if articles:
         archive_articles(db_conn, date_str, "daily",
-                         [{"title": a["title"], "url": a["url"]} for a in articles])
+                         [{"title": a["title"], "url": a["url"]} for a in articles],
+                         nlm_notebook_id=nlm_notebook)
 
     logger.info("Daily 파이프라인 완료 (status=%s)", send_status)
 
