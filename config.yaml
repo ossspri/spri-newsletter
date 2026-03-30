@@ -25,7 +25,7 @@ recipients:
 
 # ── Google Drive ──
 drive:
-  folder_id: "YOUR_DRIVE_FOLDER_ID"
+  folder_id: "1D9K1kwSogf1imTRSXv3hhoKHJmODwwsk"
 
 # ── NotebookLM ──
 notebooklm:
