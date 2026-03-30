@@ -19,11 +19,9 @@ newsletter:
 # ── 이메일 수신자 ──
 recipients:
   daily:
-    - "analyst1@spri.kr"
-    - "analyst2@spri.kr"
+    - "hsy@spri.kr"
   weekly:
-    - "director@spri.kr"
-    - "team-lead@spri.kr"
+    - "hsy@spri.kr"
 
 # ── Google Drive ──
 drive:
