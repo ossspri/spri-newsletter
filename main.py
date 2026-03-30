@@ -42,12 +42,14 @@ def setup_logging(config: dict) -> None:
     log_file = BASE_DIR / log_cfg.get("file", "logs/spri.log")
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    stdout_utf8 = open(sys.stdout.fileno(), mode="w", encoding="utf-8",
+                       closefd=False, buffering=1)
     logging.basicConfig(
         level=getattr(logging, log_cfg.get("level", "INFO")),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
+            logging.StreamHandler(stdout_utf8),
         ],
     )
 
