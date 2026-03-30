@@ -1,11 +1,13 @@
 # ── 뉴스 수집 ──
 gnews:
   queries:
-    - "software industry AI"
-    - "AI regulation policy"
-    - "big tech AI strategy"
+    - "software"
+    - "SaaS"
+    - "AI regulation"
+    - "AI policy"
+    - "big tech AI"
     - "AI semiconductor GPU"
-    - "software developer AI"
+    - "software developer"
     - "AI research breakthrough"
   lang: "en"
   max_per_query: 50
@@ -19,15 +21,17 @@ newsletter:
 # ── 이메일 수신자 ──
 recipients:
   daily:
-    - "analyst1@spri.kr"
-    - "analyst2@spri.kr"
+    - "hsy@spri.kr"
   weekly:
-    - "director@spri.kr"
-    - "team-lead@spri.kr"
+    - "hsy@spri.kr"
+
+# ── Google Sheets (DB) ──
+google_sheets:
+  spreadsheet_id: "1qVL5oxeNfh7SeTDVi_naqyle2RaW2TnigK4wlSYrlS0"
 
 # ── Google Drive ──
 drive:
-  folder_id: "YOUR_DRIVE_FOLDER_ID"
+  folder_id: "1D9K1kwSogf1imTRSXv3hhoKHJmODwwsk"
 
 # ── NotebookLM ──
 notebooklm:
