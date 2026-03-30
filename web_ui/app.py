@@ -6,11 +6,10 @@ Weekly 탭: 기사 선택(N/25) → 생성 → 발송
 """
 import logging
 import os
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, g, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 
 from src.db import (
     insert_daily_articles,
@@ -20,6 +19,8 @@ from src.db import (
     log_newsletter,
     archive_articles,
     insert_manual_article,
+    get_daily_articles_today,
+    get_all_manual_articles,
 )
 from src.news_service import GNewsService
 from src.claude_service import ClaudeService
@@ -69,12 +70,12 @@ def extract_url_metadata(url: str) -> dict:
         return {"title": url, "description": ""}
 
 
-def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
+def create_app(config: dict, db_conn) -> Flask:
     """Flask 앱을 생성한다.
 
     Args:
         config: config.yaml 설정 dict
-        db_conn: SQLite DB 연결
+        db_conn: SheetsDB 인스턴스
 
     Returns:
         Flask 앱 인스턴스
@@ -85,32 +86,10 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
         static_folder=str(Path(__file__).parent / "static"),
     )
     app.config["config"] = config
-
-    # DB 경로 추출 — :memory: 또는 파일 경로
-    db_path = db_conn.execute("PRAGMA database_list").fetchone()[2]
-    is_memory = not db_path  # :memory: DB는 빈 문자열 반환
-
-    if is_memory:
-        # 테스트 환경: 인메모리 DB를 직접 공유 (스레드 안전성은 테스트에서 단일 스레드)
-        app.config["db_conn"] = db_conn
-    else:
-        app.config["db_path"] = db_path
+    app.config["db_conn"] = db_conn
 
     def get_db():
-        """요청마다 DB 연결을 반환한다."""
-        if is_memory:
-            return app.config["db_conn"]
-        if "db_conn" not in g:
-            g.db_conn = sqlite3.connect(app.config["db_path"])
-            g.db_conn.execute("PRAGMA journal_mode=WAL")
-        return g.db_conn
-
-    @app.teardown_appcontext
-    def close_db(exc):
-        if not is_memory:
-            conn = g.pop("db_conn", None)
-            if conn is not None:
-                conn.close()
+        return app.config["db_conn"]
 
     def get_cfg():
         return app.config["config"]
@@ -125,20 +104,9 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
 
     @app.route("/daily")
     def daily_page():
-        conn = get_db()
-        today = datetime.now().strftime("%Y-%m-%d")
-        # 오늘 수집된 기사
-        cursor = conn.execute(
-            "SELECT id, title, url, description, source_name, published_at "
-            "FROM daily_articles WHERE collected_at LIKE ? ORDER BY published_at DESC",
-            (f"{today}%",),
-        )
-        articles = [
-            {"id": r[0], "title": r[1], "url": r[2], "description": r[3],
-             "source_name": r[4], "published_at": r[5]}
-            for r in cursor.fetchall()
-        ]
-        sent_today = check_today_sent(conn, "daily")
+        db = get_db()
+        articles = get_daily_articles_today(db)
+        sent_today = check_today_sent(db, "daily")
         return render_template("daily.html", articles=articles, sent_today=sent_today)
 
     @app.route("/daily/fetch", methods=["POST"])
@@ -163,18 +131,8 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
     def daily_generate():
         """Claude API로 Daily 뉴스레터를 생성한다."""
         try:
-            conn = get_db()
-            today = datetime.now().strftime("%Y-%m-%d")
-            cursor = conn.execute(
-                "SELECT title, url, description, source_name, published_at "
-                "FROM daily_articles WHERE collected_at LIKE ? ORDER BY published_at DESC",
-                (f"{today}%",),
-            )
-            articles = [
-                {"title": r[0], "url": r[1], "description": r[2],
-                 "source_name": r[3], "published_at": r[4]}
-                for r in cursor.fetchall()
-            ]
+            db = get_db()
+            articles = get_daily_articles_today(db)
 
             if not articles:
                 return jsonify({
@@ -182,7 +140,7 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
                     "error": "수집된 기사가 없습니다. 먼저 뉴스를 수집하세요.",
                 }), 400
 
-            existing_summaries = get_existing_summaries(conn)
+            existing_summaries = get_existing_summaries(db)
             claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
             claude = ClaudeService(get_cfg(), claude_api_key)
             markdown = claude.generate_daily(articles, existing_summaries)
@@ -262,21 +220,16 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
 
     @app.route("/weekly")
     def weekly_page():
-        conn = get_db()
-        articles = get_weekly_articles(conn, days=7)
+        db = get_db()
+        articles = get_weekly_articles(db, days=7)
         # 날짜별 그룹핑
         grouped = {}
         for a in articles:
-            date_key = a["published_at"][:10] if a["published_at"] else "unknown"
+            pub = str(a.get("published_at", ""))
+            date_key = pub[:10] if pub else "unknown"
             grouped.setdefault(date_key, []).append(a)
         # 수동 추가 기사
-        cursor = conn.execute(
-            "SELECT id, title, url, description FROM manual_articles ORDER BY added_at DESC"
-        )
-        manual_articles = [
-            {"id": r[0], "title": r[1], "url": r[2], "description": r[3]}
-            for r in cursor.fetchall()
-        ]
+        manual_articles = get_all_manual_articles(db)
         return render_template(
             "weekly.html",
             grouped_articles=grouped,

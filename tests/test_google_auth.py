@@ -20,7 +20,10 @@ class TestScopes:
         assert "https://www.googleapis.com/auth/documents" in SCOPES
 
     def test_scopes_count(self):
-        assert len(SCOPES) == 3
+        assert len(SCOPES) == 4
+
+    def test_spreadsheets_scope(self):
+        assert "https://www.googleapis.com/auth/spreadsheets" in SCOPES
 
 
 class TestGetGoogleCredentials:

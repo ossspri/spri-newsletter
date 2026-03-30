@@ -6,7 +6,8 @@
       "Read(//c/Users/martin.hs.yoo/**)",
       "Bash(python -m pytest tests/ -v --tb=short)",
       "Bash(python -m pytest --tb=no -q)",
-      "Bash(python main.py --mode daily)"
+      "Bash(python main.py --mode daily)",
+      "Bash(sqlite3 data/spri_newsletter.db \"SELECT ''=== daily_articles \\('' || COUNT\\(*\\) || ''건\\) ==='' FROM daily_articles; SELECT id, collected_at, title, source_name FROM daily_articles ORDER BY id DESC LIMIT 5;\")"
     ]
   }
 }

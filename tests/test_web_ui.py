@@ -1,12 +1,12 @@
 """tests/test_web_ui.py — 웹 UI Flask 앱 테스트 (Phase 6)"""
 import json
-import sqlite3
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.db import init_db, insert_daily_articles, log_newsletter
+from src.db import insert_daily_articles, log_newsletter
 from web_ui.app import create_app
+from tests.conftest import create_fake_sheets_db
 
 
 SAMPLE_CONFIG = {
@@ -59,10 +59,8 @@ SAMPLE_MARKDOWN = """\
 
 @pytest.fixture
 def db_conn():
-    """인메모리 SQLite DB."""
-    conn = init_db(":memory:")
-    yield conn
-    conn.close()
+    """인메모리 SheetsDB."""
+    return create_fake_sheets_db()
 
 
 @pytest.fixture

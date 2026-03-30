@@ -92,11 +92,11 @@ class NotebookLMService:
                         notebook_id, article["url"]
                     )
                     logger.info(
-                        "소스 추가: %s → %s", article["title"], notebook_title
+                        "소스 추가: %s -> %s", article["title"], notebook_title
                     )
                 except Exception as e:
                     logger.warning(
-                        "소스 추가 실패 (계속 진행): %s — %s",
+                        "소스 추가 실패 (계속 진행): %s - %s",
                         article["url"], e,
                     )
 

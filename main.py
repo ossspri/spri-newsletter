@@ -57,14 +57,14 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
 
     1. config.yaml, .env 로드 (완료 — main()에서 처리)
     2. GNews API 호출 → 기사 수집
-    3. 중복 제거 + 25건 제한 → SQLite 저장
+    3. 중복 제거 + 25건 제한 → Google Sheets 저장
     4. 이전 뉴스레터 요약 조회 (중복 배제용)
     5. Claude API 호출 → 뉴스레터 마크다운 생성
     6. 마크다운 → HTML 변환
     7. Gmail API → Daily 수신자에게 발송
     8. Google Drive API → 구글 문서 생성 (Phase 5)
     9. notebooklm-py → 기사 URL 저장 (Phase 5)
-    10. SQLite → 발송 이력 기록
+    10. Google Sheets → 발송 이력 기록
     11. 로컬 백업 → .md 파일 저장
     """
     logger = logging.getLogger(__name__)
@@ -86,13 +86,13 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
                        error_message=f"GNews 수집 실패: {e}")
         return
 
-    # ── Step 3: SQLite 저장 ──
+    # ── Step 3: Google Sheets 저장 ──
     inserted = insert_daily_articles(db_conn, articles)
     logger.info("DB 저장: %d건 삽입", inserted)
 
     # PRD 10: 기사 0건 수집 시 메시지 대체
     if not articles:
-        logger.warning("수집된 기사 0건 — 대체 메시지로 발송")
+        logger.warning("수집된 기사 0건 - 대체 메시지로 발송")
         markdown_body = "※ 해당 기간 주요 신규 동향 없음"
     else:
         # ── Step 4: 이전 뉴스레터 요약 조회 ──
@@ -106,7 +106,7 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
             markdown_body = claude.generate_daily(articles, existing_summaries)
         except Exception as e:
             # PRD 10: Claude 실패 시 기사 목록만 발송
-            logger.error("Claude API 실패 — 기사 목록만 발송: %s", e)
+            logger.error("Claude API 실패 - 기사 목록만 발송: %s", e)
             markdown_body = _fallback_articles_markdown(articles)
 
     # ── Step 6: 마크다운 → HTML 변환 ──
@@ -254,10 +254,12 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("SPRi 뉴스레터 시스템 시작 (mode=%s)", args.mode)
 
-    # DB 초기화
-    db_path = BASE_DIR / "data" / "spri_newsletter.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    db_conn = init_db(str(db_path))
+    # DB 초기화 (Google Sheets)
+    creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+    token_path = str(BASE_DIR / "credentials" / "google_token.json")
+    creds = get_google_credentials(creds_path, token_path)
+    spreadsheet_id = config.get("google_sheets", {}).get("spreadsheet_id", "")
+    db_conn = init_db(spreadsheet_id, creds)
 
     try:
         if args.mode == "daily":

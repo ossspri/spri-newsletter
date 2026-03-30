@@ -1,11 +1,9 @@
-"""tests/test_db.py — SQLite DB 모듈 TDD 테스트"""
-import sqlite3
+"""tests/test_db.py — Google Sheets DB 모듈 테스트"""
 from datetime import datetime, timedelta
 
 import pytest
 
 from src.db import (
-    init_db,
     insert_daily_articles,
     insert_manual_article,
     get_articles_for_date_range,
@@ -14,45 +12,32 @@ from src.db import (
     log_newsletter,
     archive_articles,
     get_weekly_articles,
+    get_daily_articles_today,
+    get_all_manual_articles,
+    SHEET_HEADERS,
 )
-
-
-@pytest.fixture
-def db(tmp_path):
-    """인메모리 대신 tmp_path에 DB 생성하여 테스트."""
-    db_path = str(tmp_path / "test.db")
-    conn = init_db(db_path)
-    yield conn
-    conn.close()
 
 
 # ── 스키마 검증 ──
 
 class TestSchema:
-    def test_tables_exist(self, db):
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
-        tables = [row[0] for row in cursor.fetchall()]
-        assert "daily_articles" in tables
-        assert "manual_articles" in tables
-        assert "article_archive" in tables
-        assert "newsletter_log" in tables
+    def test_sheets_exist(self, db):
+        """4개 시트 탭이 존재한다."""
+        titles = {ws.title for ws in db.spreadsheet.worksheets()}
+        assert "daily_articles" in titles
+        assert "manual_articles" in titles
+        assert "article_archive" in titles
+        assert "newsletter_log" in titles
 
-    def test_daily_articles_columns(self, db):
-        cursor = db.execute("PRAGMA table_info(daily_articles)")
-        cols = {row[1] for row in cursor.fetchall()}
-        expected = {"id", "collected_at", "title", "url", "description",
-                    "source_name", "published_at", "used_in"}
-        assert expected == cols
+    def test_daily_articles_headers(self, db):
+        headers = db.worksheet("daily_articles").row_values(1)
+        expected = SHEET_HEADERS["daily_articles"]
+        assert headers == expected
 
-    def test_newsletter_log_columns(self, db):
-        cursor = db.execute("PRAGMA table_info(newsletter_log)")
-        cols = {row[1] for row in cursor.fetchall()}
-        expected = {"id", "sent_at", "type", "article_count",
-                    "recipient_count", "status", "error_message",
-                    "drive_doc_id", "nlm_notebook"}
-        assert expected == cols
+    def test_newsletter_log_headers(self, db):
+        headers = db.worksheet("newsletter_log").row_values(1)
+        expected = SHEET_HEADERS["newsletter_log"]
+        assert headers == expected
 
 
 # ── daily_articles CRUD ──
@@ -81,8 +66,8 @@ class TestDailyArticles:
         count = insert_daily_articles(db, articles)
         assert count == 2
 
-        rows = db.execute("SELECT * FROM daily_articles").fetchall()
-        assert len(rows) == 2
+        records = db.worksheet("daily_articles").get_all_records()
+        assert len(records) == 2
 
     def test_dedup_on_url(self, db):
         articles = self._sample_articles()
@@ -91,8 +76,8 @@ class TestDailyArticles:
         count = insert_daily_articles(db, articles)
         assert count == 0
 
-        rows = db.execute("SELECT * FROM daily_articles").fetchall()
-        assert len(rows) == 2
+        records = db.worksheet("daily_articles").get_all_records()
+        assert len(records) == 2
 
     def test_partial_dedup(self, db):
         articles = self._sample_articles()
@@ -111,8 +96,8 @@ class TestDailyArticles:
         count = insert_daily_articles(db, new_articles)
         assert count == 1
 
-        rows = db.execute("SELECT * FROM daily_articles").fetchall()
-        assert len(rows) == 3
+        records = db.worksheet("daily_articles").get_all_records()
+        assert len(records) == 3
 
 
 # ── manual_articles ──
@@ -120,15 +105,16 @@ class TestDailyArticles:
 class TestManualArticles:
     def test_insert_manual(self, db):
         insert_manual_article(db, "Manual Title", "https://manual.com/1", "desc")
-        rows = db.execute("SELECT * FROM manual_articles").fetchall()
-        assert len(rows) == 1
-        assert rows[0][2] == "Manual Title"  # title
+        records = db.worksheet("manual_articles").get_all_records()
+        assert len(records) == 1
+        assert records[0]["title"] == "Manual Title"
 
     def test_dedup_manual(self, db):
         insert_manual_article(db, "Title", "https://manual.com/1", "desc")
-        insert_manual_article(db, "Title", "https://manual.com/1", "desc")
-        rows = db.execute("SELECT * FROM manual_articles").fetchall()
-        assert len(rows) == 1
+        result = insert_manual_article(db, "Title", "https://manual.com/1", "desc")
+        assert result is False
+        records = db.worksheet("manual_articles").get_all_records()
+        assert len(records) == 1
 
 
 # ── get_articles_for_date_range ──
@@ -166,15 +152,11 @@ class TestExistingSummaries:
         assert summaries == ""
 
     def test_returns_titles_from_archive(self, db):
-        db.execute(
-            "INSERT INTO article_archive (newsletter_date, newsletter_type, section, article_title, article_url) VALUES (?, ?, ?, ?, ?)",
-            ("2026-03-28", "daily", "개요", "**AI 혁명이 SW 산업 변화를 가속화**", "https://example.com/1"),
-        )
-        db.execute(
-            "INSERT INTO article_archive (newsletter_date, newsletter_type, section, article_title, article_url) VALUES (?, ?, ?, ?, ?)",
-            ("2026-03-28", "daily", "기업/산업", "**빅테크 AI 투자 확대**", "https://example.com/2"),
-        )
-        db.commit()
+        ws = db.worksheet("article_archive")
+        ws.append_row([1, "2026-03-28", "daily", "개요",
+                        "**AI 혁명이 SW 산업 변화를 가속화**", "https://example.com/1", ""])
+        ws.append_row([2, "2026-03-28", "daily", "기업/산업",
+                        "**빅테크 AI 투자 확대**", "https://example.com/2", ""])
 
         summaries = get_existing_summaries(db)
         assert "AI 혁명이 SW 산업 변화를 가속화" in summaries
@@ -189,29 +171,20 @@ class TestCheckTodaySent:
 
     def test_true_when_sent_today(self, db):
         now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        db.execute(
-            "INSERT INTO newsletter_log (sent_at, type, article_count, recipient_count, status) VALUES (?, ?, ?, ?, ?)",
-            (now, "daily", 10, 5, "success"),
-        )
-        db.commit()
+        ws = db.worksheet("newsletter_log")
+        ws.append_row([1, now, "daily", 10, 5, "success", "", "", ""])
         assert check_today_sent(db, "daily") is True
 
     def test_false_for_different_type(self, db):
         now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        db.execute(
-            "INSERT INTO newsletter_log (sent_at, type, article_count, recipient_count, status) VALUES (?, ?, ?, ?, ?)",
-            (now, "weekly", 10, 5, "success"),
-        )
-        db.commit()
+        ws = db.worksheet("newsletter_log")
+        ws.append_row([1, now, "weekly", 10, 5, "success", "", "", ""])
         assert check_today_sent(db, "daily") is False
 
     def test_false_for_failed_status(self, db):
         now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        db.execute(
-            "INSERT INTO newsletter_log (sent_at, type, article_count, recipient_count, status) VALUES (?, ?, ?, ?, ?)",
-            (now, "daily", 10, 5, "failed"),
-        )
-        db.commit()
+        ws = db.worksheet("newsletter_log")
+        ws.append_row([1, now, "daily", 10, 5, "failed", "", "", ""])
         assert check_today_sent(db, "daily") is False
 
 
@@ -220,18 +193,18 @@ class TestCheckTodaySent:
 class TestLogNewsletter:
     def test_log_success(self, db):
         log_newsletter(db, "daily", 15, 3, "success")
-        rows = db.execute("SELECT * FROM newsletter_log").fetchall()
-        assert len(rows) == 1
-        assert rows[0][4] == 3  # recipient_count
+        records = db.worksheet("newsletter_log").get_all_records()
+        assert len(records) == 1
+        assert records[0]["recipient_count"] == 3
 
     def test_log_with_optional_fields(self, db):
         log_newsletter(
             db, "weekly", 20, 5, "success",
             drive_doc_id="doc_123", nlm_notebook="SPRi_2026_0330",
         )
-        row = db.execute("SELECT drive_doc_id, nlm_notebook FROM newsletter_log").fetchone()
-        assert row[0] == "doc_123"
-        assert row[1] == "SPRi_2026_0330"
+        records = db.worksheet("newsletter_log").get_all_records()
+        assert records[0]["drive_doc_id"] == "doc_123"
+        assert records[0]["nlm_notebook"] == "SPRi_2026_0330"
 
 
 # ── archive_articles ──
@@ -244,8 +217,8 @@ class TestArchiveArticles:
         ]
         archive_articles(db, "2026-03-29", "daily", articles_data)
 
-        rows = db.execute("SELECT * FROM article_archive").fetchall()
-        assert len(rows) == 2
+        records = db.worksheet("article_archive").get_all_records()
+        assert len(records) == 2
 
 
 # ── get_weekly_articles (7일간 기사) ──
@@ -253,17 +226,46 @@ class TestArchiveArticles:
 class TestGetWeeklyArticles:
     def test_returns_7_days(self, db):
         today = datetime.now()
+        ws = db.worksheet("daily_articles")
         for i in range(10):
             d = today - timedelta(days=i)
-            db.execute(
-                "INSERT INTO daily_articles (collected_at, title, url, description, source_name, published_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (d.strftime("%Y-%m-%dT%H:%M:%S"), f"Article {i}",
-                 f"https://example.com/{i}", "desc", "Src",
-                 d.strftime("%Y-%m-%dT%H:%M:%SZ")),
-            )
-        db.commit()
+            ws.append_row([
+                i + 1, d.strftime("%Y-%m-%dT%H:%M:%S"),
+                f"Article {i}", f"https://example.com/{i}",
+                "desc", "Src", d.strftime("%Y-%m-%dT%H:%M:%SZ"), "",
+            ])
 
         results = get_weekly_articles(db)
         # 7일 timedelta 기준: 오늘 포함 최대 8건 (경계 시각에 따라 7~8)
         assert len(results) <= 8
         assert len(results) >= 7
+
+
+# ── get_daily_articles_today ──
+
+class TestGetDailyArticlesToday:
+    def test_returns_today_only(self, db):
+        today = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        ws = db.worksheet("daily_articles")
+        ws.append_row([1, today, "Today Article", "https://example.com/today",
+                        "desc", "Src", today, ""])
+        ws.append_row([2, yesterday, "Yesterday Article", "https://example.com/yesterday",
+                        "desc", "Src", yesterday, ""])
+
+        results = get_daily_articles_today(db)
+        assert len(results) == 1
+        assert results[0]["title"] == "Today Article"
+
+
+# ── get_all_manual_articles ──
+
+class TestGetAllManualArticles:
+    def test_returns_all_sorted(self, db):
+        ws = db.worksheet("manual_articles")
+        ws.append_row([1, "2026-03-28T10:00:00", "Older", "https://a.com/1", "d", "expert"])
+        ws.append_row([2, "2026-03-29T10:00:00", "Newer", "https://a.com/2", "d", "expert"])
+
+        results = get_all_manual_articles(db)
+        assert len(results) == 2
+        assert results[0]["title"] == "Newer"  # 최신순

@@ -32,7 +32,7 @@ class GNewsService:
 
         deduped = self._dedup_articles(all_articles)
         result = self._sort_and_limit(deduped)
-        logger.info("최종 기사: %d건 (중복제거 후 %d → 제한 %d)",
+        logger.info("최종 기사: %d건 (중복제거 후 %d -> 제한 %d)",
                      len(result), len(deduped), self.max_articles)
         return result
 
