@@ -142,13 +142,16 @@ class TestCreateDocument:
         svc.create_document(SAMPLE_MARKDOWN, "daily", SAMPLE_DATE, SAMPLE_FOLDER_ID)
 
         batch_call = mock_docs_api.documents().batchUpdate
-        batch_call.assert_called_once()
-        call_kwargs = batch_call.call_args[1]
-        assert call_kwargs["documentId"] == "doc_abc123"
-        requests = call_kwargs["body"]["requests"]
+        # 2회 호출: 1차 텍스트 삽입, 2차 스타일링
+        assert batch_call.call_count == 2
+        first_call_kwargs = batch_call.call_args_list[0][1]
+        assert first_call_kwargs["documentId"] == "doc_abc123"
+        requests = first_call_kwargs["body"]["requests"]
         assert len(requests) == 1
-        assert requests[0]["insertText"]["text"] == SAMPLE_MARKDOWN
         assert requests[0]["insertText"]["location"]["index"] == 1
+        inserted_text = requests[0]["insertText"]["text"]
+        assert "글로벌 SW 산업 동향 보고서" in inserted_text
+        assert SAMPLE_MARKDOWN.split("\n")[0] in inserted_text
 
     @patch("src.drive_service.build")
     def test_moves_document_to_folder(

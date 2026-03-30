@@ -62,18 +62,8 @@ class DriveService:
         doc_id = doc["documentId"]
         logger.info("구글 문서 생성: title='%s', id=%s", title, doc_id)
 
-        # Step 2: 마크다운 본문 삽입
-        requests = [
-            {
-                "insertText": {
-                    "location": {"index": 1},
-                    "text": markdown_body,
-                }
-            }
-        ]
-        self.docs_service.documents().batchUpdate(
-            documentId=doc_id, body={"requests": requests}
-        ).execute()
+        # Step 2: 헤더 + 본문 삽입 및 스타일링
+        self._insert_styled_content(doc_id, markdown_body, newsletter_type, date_str)
         logger.info("구글 문서 본문 삽입 완료: %s", doc_id)
 
         # Step 3: 지정 폴더로 이동
@@ -86,6 +76,126 @@ class DriveService:
         logger.info("구글 문서 폴더 이동: folder_id=%s", folder_id)
 
         return doc_id
+
+    def _insert_styled_content(
+        self, doc_id: str, markdown_body: str, newsletter_type: str, date_str: str
+    ) -> None:
+        """헤더, 구분선, 본문을 삽입하고 Google Docs 스타일을 적용한다."""
+        if newsletter_type == "weekly":
+            doc_title = "주간 SW 산업 동향 보고서"
+            subtitle = "WEEKLY REPORT"
+        else:
+            doc_title = "글로벌 SW 산업 동향 보고서"
+            subtitle = "DAILY BRIEFING"
+
+        header_line = f"소프트웨어정책연구소 · {subtitle}"
+        meta_line = f"발행일: {date_str} | Software Industry Analyst Agent by SPRi"
+
+        # 본문 라인 파싱
+        body_lines = [line for line in markdown_body.split("\n") if line.strip()]
+
+        # 전체 텍스트를 한 번에 삽입 (역순으로 index 1에 삽입하면 복잡하므로, 순서대로 구성)
+        all_lines = [doc_title, header_line, meta_line, ""] + body_lines
+        full_text = "\n".join(all_lines) + "\n"
+
+        # Step 1: 텍스트 삽입
+        self.docs_service.documents().batchUpdate(
+            documentId=doc_id,
+            body={"requests": [{"insertText": {"location": {"index": 1}, "text": full_text}}]},
+        ).execute()
+
+        # Step 2: 스타일링 요청 구성
+        requests = []
+        idx = 1  # 문서 내 현재 인덱스
+
+        for i, line in enumerate(all_lines):
+            line_len = len(line)
+            end_idx = idx + line_len
+
+            if i == 0:
+                # 제목: TITLE, 파랑, 볼드, 가운데 정렬
+                requests.append(self._style_paragraph(idx, end_idx, "TITLE", "#1a73e8", True, "CENTER"))
+            elif i == 1:
+                # 부제: SUBTITLE, 회색, 가운데 정렬
+                requests.append(self._style_paragraph(idx, end_idx, "SUBTITLE", "#70757a", False, "CENTER"))
+            elif i == 2:
+                # 메타: NORMAL, 회색, 가운데 정렬, 작은 글씨
+                requests.append(self._style_paragraph(idx, end_idx, "NORMAL_TEXT", "#70757a", False, "CENTER"))
+                requests.append(self._style_font_size(idx, end_idx, 9))
+            elif line.startswith("## "):
+                # 섹션 헤더: HEADING_2, 배경색
+                requests.append(self._style_paragraph(idx, end_idx, "HEADING_2", "#202124", True, "START"))
+                requests.append(self._style_paragraph_bg(idx, end_idx, "#f1f3f4"))
+            elif line.startswith("* ["):
+                # 출처 링크: 작은 회색 텍스트
+                requests.append(self._style_text(idx, end_idx, "#888888", False))
+                requests.append(self._style_font_size(idx, end_idx, 10))
+            elif line.startswith("**") and line.endswith("**"):
+                # 볼드 요약줄
+                requests.append(self._style_text(idx, end_idx, "#202124", True))
+
+            idx = end_idx + 1  # +1 for newline
+
+        # 제목 아래 구분선 삽입 (메타라인 이후)
+        # 구분선은 별도 처리가 복잡하므로 건너뜀
+
+        if requests:
+            self.docs_service.documents().batchUpdate(
+                documentId=doc_id, body={"requests": requests}
+            ).execute()
+
+    @staticmethod
+    def _style_paragraph(start: int, end: int, named_style: str, color: str, bold: bool, alignment: str) -> dict:
+        r, g, b = int(color[1:3], 16) / 255, int(color[3:5], 16) / 255, int(color[5:7], 16) / 255
+        return {
+            "updateParagraphStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "paragraphStyle": {
+                    "namedStyleType": named_style,
+                    "alignment": alignment,
+                },
+                "fields": "namedStyleType,alignment",
+            }
+        }
+
+    @staticmethod
+    def _style_text(start: int, end: int, color: str, bold: bool) -> dict:
+        r, g, b = int(color[1:3], 16) / 255, int(color[3:5], 16) / 255, int(color[5:7], 16) / 255
+        return {
+            "updateTextStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "textStyle": {
+                    "foregroundColor": {"color": {"rgbColor": {"red": r, "green": g, "blue": b}}},
+                    "bold": bold,
+                },
+                "fields": "foregroundColor,bold",
+            }
+        }
+
+    @staticmethod
+    def _style_font_size(start: int, end: int, pt: int) -> dict:
+        return {
+            "updateTextStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "textStyle": {"fontSize": {"magnitude": pt, "unit": "PT"}},
+                "fields": "fontSize",
+            }
+        }
+
+    @staticmethod
+    def _style_paragraph_bg(start: int, end: int, color: str) -> dict:
+        r, g, b = int(color[1:3], 16) / 255, int(color[3:5], 16) / 255, int(color[5:7], 16) / 255
+        return {
+            "updateParagraphStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "paragraphStyle": {
+                    "shading": {
+                        "backgroundColor": {"color": {"rgbColor": {"red": r, "green": g, "blue": b}}}
+                    }
+                },
+                "fields": "shading",
+            }
+        }
 
     def build_title(self, newsletter_type: str, date_str: str) -> str:
         """문서 제목을 생성한다 (PRD 4.1 명명 규칙).

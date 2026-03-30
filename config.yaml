@@ -16,7 +16,7 @@ gnews:
 newsletter:
   max_articles: 25
   model: "claude-sonnet-4-20250514"
-  max_tokens: 4096
+  max_tokens: 16000
 
 # ── 이메일 수신자 ──
 recipients:
