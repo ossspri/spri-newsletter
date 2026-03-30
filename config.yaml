@@ -1,11 +1,13 @@
 # ── 뉴스 수집 ──
 gnews:
   queries:
-    - "software industry AI"
-    - "AI regulation policy"
-    - "big tech AI strategy"
+    - "software"
+    - "SaaS"
+    - "AI regulation"
+    - "AI policy"
+    - "big tech AI"
     - "AI semiconductor GPU"
-    - "software developer AI"
+    - "software developer"
     - "AI research breakthrough"
   lang: "en"
   max_per_query: 50

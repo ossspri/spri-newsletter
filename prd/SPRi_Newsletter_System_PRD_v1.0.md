@@ -56,12 +56,14 @@ Daily는 OS 크론 자동 실행과 전문가 수동 실행을 모두 지원하�
 
 - **API**: GNews API (`https://gnews.io/api/v4/search`)
 - **검색 키워드** (6개 쿼리를 순차 호출):
-  1. `software industry AI`
-  2. `AI regulation policy`
-  3. `big tech AI strategy`
-  4. `AI semiconductor GPU`
-  5. `software developer AI`
-  6. `AI research breakthrough`
+  1. `software`
+  2. `SaaS`
+  3. `AI regulation`
+  4. `AI policy`
+  5. `big tech AI`
+  6. `AI semiconductor GPU`
+  7. `software developer`
+  8. `AI research breakthrough`
 - **필터 조건**:
   - `from`: 현재 시각 기준 24시간 이전 (ISO 8601)
   - `lang`: `en`

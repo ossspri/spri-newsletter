@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, g, render_template, request, jsonify, redirect, url_for
 
 from src.db import (
     insert_daily_articles,
@@ -85,10 +85,32 @@ def create_app(config: dict, db_conn: sqlite3.Connection) -> Flask:
         static_folder=str(Path(__file__).parent / "static"),
     )
     app.config["config"] = config
-    app.config["db_conn"] = db_conn
+
+    # DB 경로 추출 — :memory: 또는 파일 경로
+    db_path = db_conn.execute("PRAGMA database_list").fetchone()[2]
+    is_memory = not db_path  # :memory: DB는 빈 문자열 반환
+
+    if is_memory:
+        # 테스트 환경: 인메모리 DB를 직접 공유 (스레드 안전성은 테스트에서 단일 스레드)
+        app.config["db_conn"] = db_conn
+    else:
+        app.config["db_path"] = db_path
 
     def get_db():
-        return app.config["db_conn"]
+        """요청마다 DB 연결을 반환한다."""
+        if is_memory:
+            return app.config["db_conn"]
+        if "db_conn" not in g:
+            g.db_conn = sqlite3.connect(app.config["db_path"])
+            g.db_conn.execute("PRAGMA journal_mode=WAL")
+        return g.db_conn
+
+    @app.teardown_appcontext
+    def close_db(exc):
+        if not is_memory:
+            conn = g.pop("db_conn", None)
+            if conn is not None:
+                conn.close()
 
     def get_cfg():
         return app.config["config"]
