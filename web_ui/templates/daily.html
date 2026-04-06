@@ -9,6 +9,18 @@
   {% endif %}
 </div>
 
+<!-- 기사 미리보기 (독립 기능) -->
+<section class="card card-collapsible">
+  <div class="card-header">
+    <h3>기사 미리보기</h3>
+    <button id="btn-preview-articles" class="btn btn-outline" onclick="previewArticles()">GNews 검색</button>
+  </div>
+  <div id="preview-articles-section" class="hidden">
+    <div id="keywords-box" class="keywords-box"></div>
+    <div id="preview-articles-list" class="article-list"></div>
+  </div>
+</section>
+
 <!-- Step 1: 뉴스 수집 -->
 <section class="card">
   <div class="card-header">
@@ -61,6 +73,40 @@
 {% block scripts %}
 <script>
   let currentMarkdown = '';
+
+  async function previewArticles() {
+    showLoading('GNews에서 최근 24시간 기사를 검색 중...');
+    try {
+      const data = await apiCall('/daily/preview-articles', { method: 'POST' });
+      const section = document.getElementById('preview-articles-section');
+      section.classList.remove('hidden');
+
+      // 검색 키워드 표시
+      const kwBox = document.getElementById('keywords-box');
+      kwBox.innerHTML = '<strong>검색 키워드:</strong> ' +
+        data.queries.map(q => '<span class="keyword-tag">' + q + '</span>').join(' ');
+
+      // 기사 목록 렌더링
+      const listEl = document.getElementById('preview-articles-list');
+      if (data.articles.length === 0) {
+        listEl.innerHTML = '<p class="empty-state">검색된 기사가 없습니다.</p>';
+      } else {
+        listEl.innerHTML = data.articles.map(a =>
+          '<div class="article-item">' +
+            '<div class="article-title"><a href="' + a.url + '" target="_blank">' + a.title + '</a></div>' +
+            '<div class="article-meta">' + (a.source_name || '') + ' · ' + (a.published_at || '').substring(0, 10) + '</div>' +
+            '<div class="article-desc">' + (a.description || '') + '</div>' +
+          '</div>'
+        ).join('') +
+        '<p class="article-count">총 ' + data.count + '건 검색됨 (미리보기 전용, DB 미저장)</p>';
+      }
+      showToast(data.count + '건 검색 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
 
   async function fetchNews() {
     showLoading('뉴스를 수집하고 있습니다...');

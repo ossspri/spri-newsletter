@@ -322,11 +322,13 @@ class TestWeeklyGenerate:
 class TestWeeklyPublish:
     """POST /weekly/publish 보고서 발간 테스트 (이메일 + Drive + NotebookLM + 로컬 백업)."""
 
+    @patch("pathlib.Path.write_text")
+    @patch("pathlib.Path.mkdir")
     @patch("web_ui.app.NotebookLMService")
     @patch("web_ui.app.get_google_credentials")
     @patch("web_ui.app.DriveService")
     @patch("web_ui.app.GmailService")
-    def test_publish_weekly_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, client):
+    def test_publish_weekly_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, mock_mkdir, mock_write, client):
         """발간 성공 시 전체 결과를 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()

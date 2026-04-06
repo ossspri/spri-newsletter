@@ -37,10 +37,6 @@ drive:
 notebooklm:
   notebook_prefix: "SPRi"
 
-# ── 스케줄 ──
-schedule:
-  daily_time: "06:00"
-
 # ── 웹 UI ──
 web_ui:
   host: "127.0.0.1"

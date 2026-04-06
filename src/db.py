@@ -284,3 +284,31 @@ def get_all_manual_articles(db: SheetsDB) -> list[dict]:
     records = _get_all_records(ws)
     records.sort(key=lambda r: r.get("added_at", ""), reverse=True)
     return records
+
+
+def clear_today_archive(db: SheetsDB, target_date: str) -> int:
+    """특정 날짜의 기사 아카이브(article_archive)를 삭제한다 (중복 체크 초기화용).
+
+    발송 이력(newsletter_log)은 보존한다.
+
+    Args:
+        db: SheetsDB 인스턴스
+        target_date: 삭제할 날짜 문자열 (YYYY-MM-DD)
+
+    Returns:
+        삭제된 행 수
+    """
+    ws_archive = db.worksheet("article_archive")
+    all_values = ws_archive.get_all_values()
+    rows_to_delete = []
+    for i, row in enumerate(all_values):
+        if i == 0:
+            continue
+        newsletter_date = row[1] if len(row) > 1 else ""
+        if newsletter_date == target_date:
+            rows_to_delete.append(i + 1)
+    for row_num in reversed(rows_to_delete):
+        _retry(ws_archive.delete_rows, row_num)
+
+    logger.info("아카이브 초기화 완료 (%s): %d건 삭제", target_date, len(rows_to_delete))
+    return len(rows_to_delete)

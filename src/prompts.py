@@ -34,10 +34,22 @@ def build_daily_prompt(article_list: str, existing_summaries: str) -> str:
 2. 상세도: 각 섹션 내 개별 동향 요약은 반드시 3문장 이상으로 구체적이고 전문적으로 기술할 것.
 3. 스타일: 전문적인 개조식(~임, ~함), SPRi 리포트 톤 유지.
 4. 각 동향 항목 첫 줄은 반드시 '**한 줄 요약 문장**' 형식의 볼드 요약으로 시작할 것.
-5. 출처: 각 기사 하단에 '* [기사 제목](기사 직접 URL)' 형식으로 기재할 것.
+5. 출처: 각 동향 항목의 본문 바로 아래에 '* [기사 제목](기사 직접 URL)' 형식으로 각주처럼 기재할 것. 문서 끝에 출처를 모아놓지 말 것.
 6. 언어: 한국어.
 7. 허용 마크다운: '## 섹션명', '**볼드**', '* [제목](URL)' 형식만 사용할 것.
 </sub_task>
+
+<output_example>
+## 2. 정책/법제
+
+**미국 국토안보부의 AI 정책 도입으로 법집행 기관의 AI 활용 가이드라인 정립**
+오타와 경찰청이 4월 새로운 AI 정책을 발표할 예정이며...
+* [AI is coming to the Ottawa police](https://example.com/article1)
+
+**사진 인증 기술의 보안 취약점 발견으로 디지털 콘텐츠 진위성 검증 표준 재검토 필요**
+ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가능성을 제기하며...
+* [Researchers Come Up With Foolproof Method](https://example.com/article2)
+</output_example>
 </main_task>
 
 <constraints>
@@ -46,6 +58,7 @@ def build_daily_prompt(article_list: str, existing_summaries: str) -> str:
 3. 일반적인 AI 기술 소개, LLM 벤치마크 단순 비교, SW 산업과 무관한 AI 활용 사례는 제외할 것.
 4. 절대로 리포트 본문 외에 부가적 안내 문구를 포함하지 말고 리포트 내용만 출력할 것.
 5. 기사는 최대 25개까지만 포함할 것.
+6. 출처 URL을 문서 끝에 모아놓는 미주 방식은 절대 사용하지 말 것. 반드시 해당 동향 본문 바로 아래에 각주로 배치할 것.
 </constraints>
 
 <existing_summaries>
@@ -85,10 +98,22 @@ def build_weekly_prompt(article_list: str, existing_summaries: str) -> str:
 2. 상세도: 한 주간의 흐름과 맥락을 연결하여 심층 분석할 것. 각 동향 항목은 3문장 이상으로 기술.
 3. 스타일: 전문적인 개조식(~임, ~함), SPRi 리포트 톤 유지.
 4. 각 동향 항목 첫 줄은 반드시 '**한 줄 요약 문장**' 형식의 볼드 요약으로 시작할 것.
-5. 출처: 각 기사 하단에 '* [기사 제목](기사 직접 URL)' 형식으로 기재할 것.
+5. 출처: 각 동향 항목의 본문 바로 아래에 '* [기사 제목](기사 직접 URL)' 형식으로 각주처럼 기재할 것. 문서 끝에 출처를 모아놓지 말 것.
 6. 언어: 한국어.
 7. 허용 마크다운: '## 섹션명', '**볼드**', '* [제목](URL)' 형식만 사용할 것.
 </sub_task>
+
+<output_example>
+## 2. 정책/법제
+
+**미국 국토안보부의 AI 정책 도입으로 법집행 기관의 AI 활용 가이드라인 정립**
+오타와 경찰청이 4월 새로운 AI 정책을 발표할 예정이며...
+* [AI is coming to the Ottawa police](https://example.com/article1)
+
+**사진 인증 기술의 보안 취약점 발견으로 디지털 콘텐츠 진위성 검증 표준 재검토 필요**
+ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가능성을 제기하며...
+* [Researchers Come Up With Foolproof Method](https://example.com/article2)
+</output_example>
 </main_task>
 
 <constraints>
@@ -97,6 +122,7 @@ def build_weekly_prompt(article_list: str, existing_summaries: str) -> str:
 3. 일반적인 AI 기술 소개, LLM 벤치마크 단순 비교, SW 산업과 무관한 AI 활용 사례는 제외할 것.
 4. 절대로 리포트 본문 외에 부가적 안내 문구를 포함하지 말고 리포트 내용만 출력할 것.
 5. 기사는 최대 25개까지만 포함할 것.
+6. 출처 URL을 문서 끝에 모아놓는 미주 방식은 절대 사용하지 말 것. 반드시 해당 동향 본문 바로 아래에 각주로 배치할 것.
 </constraints>
 
 <existing_summaries>

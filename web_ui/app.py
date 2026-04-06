@@ -21,6 +21,7 @@ from src.db import (
     insert_manual_article,
     get_daily_articles_today,
     get_all_manual_articles,
+    clear_today_archive,
 )
 from src.news_service import GNewsService
 from src.claude_service import ClaudeService
@@ -109,6 +110,25 @@ def create_app(config: dict, db_conn) -> Flask:
         articles = get_daily_articles_today(db)
         sent_today = check_today_sent(db, "daily")
         return render_template("daily.html", articles=articles, sent_today=sent_today)
+
+    @app.route("/daily/preview-articles", methods=["POST"])
+    def daily_preview_articles():
+        """GNews API로 기사를 검색하여 미리보기만 반환한다 (DB 저장 안 함)."""
+        try:
+            cfg = get_cfg()
+            gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
+            gnews = GNewsService(cfg, gnews_api_key)
+            queries = cfg.get("gnews", {}).get("queries", [])
+            articles = gnews.fetch_articles()
+            return jsonify({
+                "success": True,
+                "queries": queries,
+                "count": len(articles),
+                "articles": articles,
+            })
+        except Exception as e:
+            logger.error("기사 미리보기 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/daily/fetch", methods=["POST"])
     def daily_fetch():
@@ -397,6 +417,39 @@ def create_app(config: dict, db_conn) -> Flask:
         return jsonify({"success": True, "results": results})
 
     # ── 공통 ──
+
+    @app.route("/reset-today", methods=["POST"])
+    def reset_today():
+        """오늘 날짜의 기사 아카이브와 로컬 백업 파일을 초기화한다 (수동 테스트용).
+
+        발송 이력(newsletter_log)은 보존한다.
+        """
+        try:
+            db = get_db()
+            date_str = get_kst_date_str()
+
+            # article_archive에서 오늘 데이터 삭제
+            archive_deleted = clear_today_archive(db, date_str)
+
+            # 로컬 백업 파일 삭제
+            backup_dir = BASE_DIR / "data" / "newsletters"
+            files_deleted = []
+            for pattern in [f"daily_{date_str}.md", f"weekly_{date_str}.md"]:
+                filepath = backup_dir / pattern
+                if filepath.exists():
+                    filepath.unlink()
+                    files_deleted.append(pattern)
+
+            logger.info("테스트 초기화 완료: 아카이브 %d건, 파일 %s", archive_deleted, files_deleted)
+            return jsonify({
+                "success": True,
+                "date": date_str,
+                "archive_deleted": archive_deleted,
+                "files_deleted": files_deleted,
+            })
+        except Exception as e:
+            logger.error("테스트 초기화 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/preview", methods=["POST"])
     def preview():

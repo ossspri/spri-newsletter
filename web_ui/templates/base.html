@@ -13,6 +13,7 @@
       <nav class="tabs">
         <a href="{{ url_for('daily_page') }}" class="tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
         <a href="{{ url_for('weekly_page') }}" class="tab {% if active_tab == 'weekly' %}active{% endif %}">Weekly</a>
+        <button class="btn-reset" onclick="resetToday()" title="오늘 생성된 아카이브와 백업 파일을 삭제합니다 (발송 이력은 보존)">초기화</button>
       </nav>
     </div>
   </header>
@@ -37,6 +38,20 @@
       el.textContent = msg;
       el.className = 'toast' + (isError ? ' toast-error' : ' toast-success');
       setTimeout(() => { el.className = 'toast hidden'; }, 4000);
+    }
+    async function resetToday() {
+      if (!confirm('오늘 날짜의 기사 아카이브와 로컬 백업 파일을 삭제합니다.\n(발송 이력은 보존됩니다)\n\n진행하시겠습니까?')) return;
+      try {
+        showLoading('초기화 중...');
+        const data = await apiCall('/reset-today', {method: 'POST', headers: {'Content-Type': 'application/json'}});
+        const msg = `${data.date} 초기화 완료: 아카이브 ${data.archive_deleted}건 삭제` +
+          (data.files_deleted.length ? `, 파일 ${data.files_deleted.join(', ')} 삭제` : '');
+        showToast(msg, false);
+      } catch (e) {
+        showToast('초기화 실패: ' + e.message, true);
+      } finally {
+        hideLoading();
+      }
     }
     async function apiCall(url, options) {
       const resp = await fetch(url, options);
