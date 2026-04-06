@@ -113,13 +113,20 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/daily/preview-articles", methods=["POST"])
     def daily_preview_articles():
-        """GNews API로 기사를 검색하여 미리보기만 반환한다 (DB 저장 안 함)."""
+        """GNews API로 기사를 검색하여 한국어 번역 미리보기를 반환한다 (DB 저장 안 함)."""
         try:
             cfg = get_cfg()
             gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
             gnews = GNewsService(cfg, gnews_api_key)
             queries = cfg.get("gnews", {}).get("queries", [])
             articles = gnews.fetch_articles()
+
+            # 기사 제목/설명을 한국어로 번역
+            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+            if claude_api_key and articles:
+                claude = ClaudeService(cfg, claude_api_key)
+                articles = claude.translate_articles(articles)
+
             return jsonify({
                 "success": True,
                 "queries": queries,

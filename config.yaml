@@ -1,16 +1,23 @@
 # ── 뉴스 수집 ──
 gnews:
   queries:
-    - "software"
+    # 기업/산업
+    - "artificial intelligence"
+    - "big tech AI"
+    - "software industry"
     - "SaaS"
+    # 정책/법제
     - "AI regulation"
     - "AI policy"
-    - "big tech AI"
-    - "AI semiconductor GPU"
-    - "software developer"
-    - "AI research breakthrough"
+    # 인력/교육
+    - "software developer AI"
+    # 기술/연구
+    - "AI model"
+    # 하드웨어/인프라
+    - "AI semiconductor"
+    - "AI datacenter"
   lang: "en"
-  max_per_query: 50
+  max_per_query: 25
 
 # ── 뉴스레터 ──
 newsletter:

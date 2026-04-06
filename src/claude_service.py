@@ -56,6 +56,51 @@ class ClaudeService:
         logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
         return result
 
+    def translate_articles(self, articles: list[dict]) -> list[dict]:
+        """기사 제목과 설명을 한국어로 번역한다."""
+        if not articles:
+            return articles
+
+        lines = []
+        for i, a in enumerate(articles):
+            lines.append(f"[{i}] TITLE: {a['title']}")
+            lines.append(f"[{i}] DESC: {a.get('description', '')}")
+
+        prompt = (
+            "아래 뉴스 기사의 제목(TITLE)과 설명(DESC)을 한국어로 번역해주세요.\n"
+            "반드시 동일한 형식([번호] TITLE: ... / [번호] DESC: ...)으로 출력하세요.\n"
+            "이미 한국어인 항목은 그대로 유지하세요.\n"
+            "번역만 출력하고 다른 설명은 하지 마세요.\n\n"
+            + "\n".join(lines)
+        )
+
+        try:
+            raw = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            ).content[0].text
+
+            translated = list(articles)  # shallow copy
+            for line in raw.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r"\[(\d+)\]\s*(TITLE|DESC):\s*(.*)", line)
+                if m:
+                    idx, field, value = int(m.group(1)), m.group(2), m.group(3).strip()
+                    if 0 <= idx < len(translated):
+                        if translated[idx] is articles[idx]:
+                            translated[idx] = dict(articles[idx])
+                        if field == "TITLE":
+                            translated[idx]["title"] = value
+                        else:
+                            translated[idx]["description"] = value
+            return translated
+        except Exception as e:
+            logger.warning("기사 번역 실패, 원문 반환: %s", e)
+            return articles
+
     @retry(max_retries=3, delay=30)
     def _call_api(self, prompt: str) -> str:
         """Claude Messages API를 호출한다 (PRD 부록 B 사양)."""

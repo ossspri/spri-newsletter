@@ -15,7 +15,7 @@ class GNewsService:
         gnews_cfg = config.get("gnews", {})
         self.queries = gnews_cfg.get("queries", [])
         self.lang = gnews_cfg.get("lang", "en")
-        self.max_per_query = gnews_cfg.get("max_per_query", 50)
+        self.max_per_query = gnews_cfg.get("max_per_query", 25)
         self.max_articles = config.get("newsletter", {}).get("max_articles", 25)
         self.api_key = api_key
 
