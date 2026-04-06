@@ -44,13 +44,12 @@
   </div>
 </section>
 
-<!-- Step 3: 미리보기 + 발송 -->
+<!-- Step 3: 미리보기 + 발간 -->
 <section class="card">
   <div class="card-header">
-    <h3>③ 미리보기 및 발송</h3>
+    <h3>③ 미리보기 및 발간</h3>
     <div class="btn-group">
-      <button id="btn-send" class="btn btn-success" onclick="sendDaily()" disabled>이메일 발송</button>
-      <button id="btn-drive" class="btn btn-secondary" onclick="saveDrive()" disabled>Drive 저장</button>
+      <button id="btn-publish" class="btn btn-success" onclick="publishDaily()" disabled>뉴스레터 발간</button>
     </div>
   </div>
   <div id="preview-container" class="preview-frame">
@@ -85,8 +84,7 @@
       document.getElementById('editor-section').classList.remove('hidden');
       document.getElementById('preview-container').innerHTML =
         '<iframe srcdoc="' + data.html_preview.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
-      document.getElementById('btn-send').disabled = false;
-      document.getElementById('btn-drive').disabled = false;
+      document.getElementById('btn-publish').disabled = false;
       showToast('뉴스레터 생성 완료');
     } catch (e) {
       showToast(e.message, true);
@@ -111,37 +109,26 @@
     }
   }
 
-  async function sendDaily() {
+  async function publishDaily() {
     {% if sent_today %}
-    if (!confirm('오늘 이미 발송됨. 재발송하시겠습니까?')) return;
+    if (!confirm('오늘 이미 발간됨. 재발간하시겠습니까?')) return;
     {% endif %}
     const md = document.getElementById('markdown-editor').value || currentMarkdown;
-    showLoading('이메일을 발송 중입니다...');
+    showLoading('뉴스레터 발간 중... (이메일 → Drive → NotebookLM)');
     try {
-      const data = await apiCall('/daily/send', {
+      const data = await apiCall('/daily/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markdown: md }),
       });
-      showToast(`이메일 발송 완료 (${data.recipients}명)`);
+      const r = data.results;
+      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
+      if (r.drive && r.drive.success) msg += ' · Drive 저장';
+      else if (r.drive) msg += ' · Drive 실패';
+      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
+      else if (r.notebooklm) msg += ' · NotebookLM 실패';
+      showToast(msg);
       location.reload();
-    } catch (e) {
-      showToast(e.message, true);
-    } finally {
-      hideLoading();
-    }
-  }
-
-  async function saveDrive() {
-    const md = document.getElementById('markdown-editor').value || currentMarkdown;
-    showLoading('Google Drive에 저장 중입니다...');
-    try {
-      const data = await apiCall('/daily/save-drive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markdown: md }),
-      });
-      showToast(`Drive 저장 완료 (ID: ${data.doc_id})`);
     } catch (e) {
       showToast(e.message, true);
     } finally {

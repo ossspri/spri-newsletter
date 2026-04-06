@@ -182,20 +182,28 @@ class TestDailyGenerate:
         assert data["success"] is False
 
 
-class TestDailySend:
-    """POST /daily/send 이메일 발송 테스트."""
+class TestDailyPublish:
+    """POST /daily/publish 뉴스레터 발간 테스트 (이메일 + Drive + NotebookLM)."""
 
+    @patch("web_ui.app.NotebookLMService")
     @patch("web_ui.app.get_google_credentials")
+    @patch("web_ui.app.DriveService")
     @patch("web_ui.app.GmailService")
-    def test_send_success(self, mock_gmail_cls, mock_auth, client):
-        """이메일 발송 성공 시 결과를 반환한다."""
+    def test_publish_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, client):
+        """발간 성공 시 3단계 결과를 모두 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg123"}
         mock_gmail_cls.return_value = mock_gmail
+        mock_drive = MagicMock()
+        mock_drive.create_document.return_value = "doc_abc123"
+        mock_drive_cls.return_value = mock_drive
+        mock_nlm = MagicMock()
+        mock_nlm.save_sources.return_value = "nb_xyz"
+        mock_nlm_cls.return_value = mock_nlm
 
         resp = client.post(
-            "/daily/send",
+            "/daily/publish",
             data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
             content_type="application/json",
         )
@@ -203,13 +211,13 @@ class TestDailySend:
 
         assert resp.status_code == 200
         assert data["success"] is True
+        assert data["results"]["email"]["success"] is True
+        assert data["results"]["drive"]["success"] is True
 
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.GmailService")
-    def test_send_missing_markdown(self, mock_gmail_cls, mock_auth, client):
+    def test_publish_missing_markdown(self, client):
         """마크다운 없이 요청하면 에러를 반환한다."""
         resp = client.post(
-            "/daily/send",
+            "/daily/publish",
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -217,30 +225,6 @@ class TestDailySend:
 
         assert resp.status_code == 400
         assert data["success"] is False
-
-
-class TestDailySaveDrive:
-    """POST /daily/save-drive Google Drive 저장 테스트."""
-
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
-    def test_save_drive_success(self, mock_drive_cls, mock_auth, client):
-        """Drive 저장 성공 시 문서 ID를 반환한다."""
-        mock_auth.return_value = MagicMock()
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_abc123"
-        mock_drive_cls.return_value = mock_drive
-
-        resp = client.post(
-            "/daily/save-drive",
-            data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
-            content_type="application/json",
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["success"] is True
-        assert data["doc_id"] == "doc_abc123"
 
 
 # ── Weekly 탭 ──
@@ -335,43 +319,28 @@ class TestWeeklyGenerate:
         assert data["success"] is False
 
 
-class TestWeeklySend:
-    """POST /weekly/send 이메일 발송 테스트."""
+class TestWeeklyPublish:
+    """POST /weekly/publish 보고서 발간 테스트 (이메일 + Drive + NotebookLM + 로컬 백업)."""
 
+    @patch("web_ui.app.NotebookLMService")
     @patch("web_ui.app.get_google_credentials")
+    @patch("web_ui.app.DriveService")
     @patch("web_ui.app.GmailService")
-    def test_send_weekly_success(self, mock_gmail_cls, mock_auth, client):
-        """주간 이메일 발송 성공 시 결과를 반환한다."""
+    def test_publish_weekly_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, client):
+        """발간 성공 시 전체 결과를 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg456"}
         mock_gmail_cls.return_value = mock_gmail
-
-        resp = client.post(
-            "/weekly/send",
-            data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
-            content_type="application/json",
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["success"] is True
-
-
-class TestWeeklySaveDrive:
-    """POST /weekly/save-drive Google Drive 저장 테스트."""
-
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
-    def test_save_drive_weekly(self, mock_drive_cls, mock_auth, client):
-        """Weekly Drive 저장 성공."""
-        mock_auth.return_value = MagicMock()
         mock_drive = MagicMock()
         mock_drive.create_document.return_value = "doc_weekly_123"
         mock_drive_cls.return_value = mock_drive
+        mock_nlm = MagicMock()
+        mock_nlm.save_sources.return_value = "nb_weekly_xyz"
+        mock_nlm_cls.return_value = mock_nlm
 
         resp = client.post(
-            "/weekly/save-drive",
+            "/weekly/publish",
             data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
             content_type="application/json",
         )
@@ -379,7 +348,20 @@ class TestWeeklySaveDrive:
 
         assert resp.status_code == 200
         assert data["success"] is True
-        assert data["doc_id"] == "doc_weekly_123"
+        assert data["results"]["email"]["success"] is True
+        assert data["results"]["drive"]["success"] is True
+
+    def test_publish_weekly_missing_markdown(self, client):
+        """마크다운 없이 요청하면 에러를 반환한다."""
+        resp = client.post(
+            "/weekly/publish",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 400
+        assert data["success"] is False
 
 
 # ── 공통 기능 ──

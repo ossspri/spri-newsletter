@@ -91,13 +91,12 @@
   </div>
 </section>
 
-<!-- Step 3: 미리보기 + 발송 -->
+<!-- Step 3: 미리보기 + 발간 -->
 <section class="card">
   <div class="card-header">
-    <h3>③ 미리보기 및 발송</h3>
+    <h3>③ 미리보기 및 발간</h3>
     <div class="btn-group">
-      <button id="btn-send-weekly" class="btn btn-success" onclick="sendWeekly()" disabled>이메일 발송</button>
-      <button id="btn-drive-weekly" class="btn btn-secondary" onclick="saveDriveWeekly()" disabled>Drive 저장</button>
+      <button id="btn-publish-weekly" class="btn btn-success" onclick="publishWeekly()" disabled>보고서 발간</button>
     </div>
   </div>
   <div id="weekly-preview-container" class="preview-frame">
@@ -182,8 +181,7 @@
       document.getElementById('weekly-editor-section').classList.remove('hidden');
       document.getElementById('weekly-preview-container').innerHTML =
         '<iframe srcdoc="' + data.html_preview.replace(/"/g, '&quot;') + '" class="preview-iframe"></iframe>';
-      document.getElementById('btn-send-weekly').disabled = false;
-      document.getElementById('btn-drive-weekly').disabled = false;
+      document.getElementById('btn-publish-weekly').disabled = false;
       showToast('주간 보고서 생성 완료');
     } catch (e) {
       showToast(e.message, true);
@@ -208,33 +206,25 @@
     }
   }
 
-  async function sendWeekly() {
+  async function publishWeekly() {
     const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
-    showLoading('이메일을 발송 중입니다...');
+    showLoading('보고서 발간 중... (이메일 → Drive → NotebookLM → 백업)');
     try {
-      const data = await apiCall('/weekly/send', {
+      const data = await apiCall('/weekly/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markdown: md }),
       });
-      showToast(`이메일 발송 완료 (${data.recipients}명)`);
-    } catch (e) {
-      showToast(e.message, true);
-    } finally {
-      hideLoading();
-    }
-  }
-
-  async function saveDriveWeekly() {
-    const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
-    showLoading('Google Drive에 저장 중입니다...');
-    try {
-      const data = await apiCall('/weekly/save-drive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markdown: md }),
-      });
-      showToast(`Drive 저장 완료 (ID: ${data.doc_id})`);
+      const r = data.results;
+      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
+      if (r.drive && r.drive.success) msg += ' · Drive 저장';
+      else if (r.drive) msg += ' · Drive 실패';
+      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
+      else if (r.notebooklm) msg += ' · NotebookLM 실패';
+      if (r.backup && r.backup.success) msg += ' · 로컬 백업';
+      else if (r.backup) msg += ' · 백업 실패';
+      showToast(msg);
+      location.reload();
     } catch (e) {
       showToast(e.message, true);
     } finally {

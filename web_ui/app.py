@@ -1,8 +1,8 @@
 """web_ui/app.py — Flask 웹 UI (Daily + Weekly 탭 통합)
 
 PRD 8: 전문가용 로컬 웹 UI.
-Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발송 3단계
-Weekly 탭: 기사 선택(N/25) → 생성 → 발송
+Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발간(이메일+Drive+NotebookLM) 3단계
+Weekly 탭: 기사 선택(N/25) → 생성 → 발간(이메일+Drive+NotebookLM+로컬백업)
 """
 import logging
 import os
@@ -27,6 +27,7 @@ from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
 from src.drive_service import DriveService
+from src.notebooklm_service import NotebookLMService
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -157,64 +158,82 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("뉴스레터 생성 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/daily/send", methods=["POST"])
-    def daily_send():
-        """Daily 이메일을 발송한다."""
+    @app.route("/daily/publish", methods=["POST"])
+    def daily_publish():
+        """Daily 뉴스레터를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM 저장)."""
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
         if not markdown:
             return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
 
-        try:
-            cfg = get_cfg()
-            date_str = get_kst_date_str()
-            date_display = get_kst_display_date()
-            recipients = cfg.get("recipients", {}).get("daily", [])
+        cfg = get_cfg()
+        db = get_db()
+        date_str = get_kst_date_str()
+        date_display = get_kst_display_date()
+        creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+        token_path = str(BASE_DIR / "credentials" / "google_token.json")
+        results = {"email": None, "drive": None, "notebooklm": None}
 
+        # ── Step 3: Gmail 발송 ──
+        try:
+            recipients = cfg.get("recipients", {}).get("daily", [])
             html_body = render_email_html(markdown, "daily", date_display)
             subject = build_email_subject("daily", date_str)
 
-            creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-            token_path = str(BASE_DIR / "credentials" / "google_token.json")
             creds = get_google_credentials(creds_path, token_path)
             gmail = GmailService(creds)
             gmail.send_email(recipients, subject, html_body)
-
-            log_newsletter(get_db(), "daily", 0, len(recipients), "success")
-
-            return jsonify({
-                "success": True,
-                "recipients": len(recipients),
-            })
+            results["email"] = {"success": True, "recipients": len(recipients)}
+            logger.info("이메일 발송 완료 (%d명)", len(recipients))
         except Exception as e:
             logger.error("이메일 발송 실패: %s", e)
-            log_newsletter(get_db(), "daily", 0, 0, "failed",
-                           error_message=str(e))
-            return jsonify({"success": False, "error": str(e)}), 500
+            log_newsletter(db, "daily", 0, 0, "failed", error_message=str(e))
+            return jsonify({
+                "success": False,
+                "error": f"이메일 발송 실패: {e}",
+                "results": results,
+            }), 500
 
-    @app.route("/daily/save-drive", methods=["POST"])
-    def daily_save_drive():
-        """Daily 뉴스레터를 Google Drive에 저장한다."""
-        data = request.get_json() or {}
-        markdown = data.get("markdown", "")
-        if not markdown:
-            return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
-
+        # ── Step 4: Google Drive 저장 ──
+        drive_doc_id = None
         try:
-            cfg = get_cfg()
-            date_str = get_kst_date_str()
             folder_id = cfg.get("drive", {}).get("folder_id", "")
-
-            creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-            token_path = str(BASE_DIR / "credentials" / "google_token.json")
             creds = get_google_credentials(creds_path, token_path)
             drive = DriveService(creds)
-            doc_id = drive.create_document(markdown, "daily", date_str, folder_id)
-
-            return jsonify({"success": True, "doc_id": doc_id})
+            drive_doc_id = drive.create_document(markdown, "daily", date_str, folder_id)
+            results["drive"] = {"success": True, "doc_id": drive_doc_id}
+            logger.info("Drive 저장 완료: %s", drive_doc_id)
         except Exception as e:
-            logger.error("Drive 저장 실패: %s", e)
-            return jsonify({"success": False, "error": str(e)}), 500
+            logger.error("Drive 저장 실패 (계속 진행): %s", e)
+            results["drive"] = {"success": False, "error": str(e)}
+
+        # ── Step 5: NotebookLM 저장 ──
+        nlm_notebook = None
+        try:
+            articles = get_daily_articles_today(db)
+            if articles:
+                nlm = NotebookLMService(cfg)
+                nlm_notebook = nlm.save_sources(
+                    date_str,
+                    [{"title": a["title"], "url": a["url"]} for a in articles],
+                    markdown,
+                )
+                results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
+                logger.info("NotebookLM 저장 완료: %s", nlm_notebook)
+            else:
+                results["notebooklm"] = {"success": True, "notebook_id": None}
+                logger.info("NotebookLM 건너뜀: 기사 없음")
+        except Exception as e:
+            logger.error("NotebookLM 저장 실패 (계속 진행): %s", e)
+            results["notebooklm"] = {"success": False, "error": str(e)}
+
+        # ── 발송 이력 기록 ──
+        log_newsletter(
+            db, "daily", 0, len(recipients), "success",
+            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
+        )
+
+        return jsonify({"success": True, "results": results})
 
     # ── Weekly 탭 ──
 
@@ -288,61 +307,94 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("주간 보고서 생성 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/weekly/send", methods=["POST"])
-    def weekly_send():
-        """Weekly 이메일을 발송한다."""
+    @app.route("/weekly/publish", methods=["POST"])
+    def weekly_publish():
+        """Weekly 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업)."""
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
         if not markdown:
             return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
 
-        try:
-            cfg = get_cfg()
-            date_str = get_kst_date_str()
-            date_display = get_kst_display_date()
-            recipients = cfg.get("recipients", {}).get("weekly", [])
+        cfg = get_cfg()
+        db = get_db()
+        date_str = get_kst_date_str()
+        date_display = get_kst_display_date()
+        creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+        token_path = str(BASE_DIR / "credentials" / "google_token.json")
+        results = {"email": None, "drive": None, "notebooklm": None, "backup": None}
 
+        # ── Step 3: Gmail 발송 ──
+        try:
+            recipients = cfg.get("recipients", {}).get("weekly", [])
             html_body = render_email_html(markdown, "weekly", date_display)
             subject = build_email_subject("weekly", date_str)
 
-            creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-            token_path = str(BASE_DIR / "credentials" / "google_token.json")
             creds = get_google_credentials(creds_path, token_path)
             gmail = GmailService(creds)
             gmail.send_email(recipients, subject, html_body)
-
-            log_newsletter(get_db(), "weekly", 0, len(recipients), "success")
-
-            return jsonify({"success": True, "recipients": len(recipients)})
+            results["email"] = {"success": True, "recipients": len(recipients)}
+            logger.info("주간 이메일 발송 완료 (%d명)", len(recipients))
         except Exception as e:
             logger.error("주간 이메일 발송 실패: %s", e)
-            log_newsletter(get_db(), "weekly", 0, 0, "failed",
-                           error_message=str(e))
-            return jsonify({"success": False, "error": str(e)}), 500
+            log_newsletter(db, "weekly", 0, 0, "failed", error_message=str(e))
+            return jsonify({
+                "success": False,
+                "error": f"이메일 발송 실패: {e}",
+                "results": results,
+            }), 500
 
-    @app.route("/weekly/save-drive", methods=["POST"])
-    def weekly_save_drive():
-        """Weekly 보고서를 Google Drive에 저장한다."""
-        data = request.get_json() or {}
-        markdown = data.get("markdown", "")
-        if not markdown:
-            return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
-
+        # ── Step 4: Google Drive 저장 ──
+        drive_doc_id = None
         try:
-            cfg = get_cfg()
-            date_str = get_kst_date_str()
             folder_id = cfg.get("drive", {}).get("folder_id", "")
-
-            creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-            token_path = str(BASE_DIR / "credentials" / "google_token.json")
             creds = get_google_credentials(creds_path, token_path)
             drive = DriveService(creds)
-            doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
-
-            return jsonify({"success": True, "doc_id": doc_id})
+            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
+            results["drive"] = {"success": True, "doc_id": drive_doc_id}
+            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
         except Exception as e:
-            logger.error("Weekly Drive 저장 실패: %s", e)
-            return jsonify({"success": False, "error": str(e)}), 500
+            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
+            results["drive"] = {"success": False, "error": str(e)}
+
+        # ── Step 5: NotebookLM 저장 + 로컬 백업 ──
+        nlm_notebook = None
+        try:
+            articles = get_weekly_articles(db, days=7)
+            if articles:
+                nlm = NotebookLMService(cfg)
+                nlm_notebook = nlm.save_sources(
+                    date_str,
+                    [{"title": a["title"], "url": a["url"]} for a in articles],
+                    markdown,
+                )
+                results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
+                logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
+            else:
+                results["notebooklm"] = {"success": True, "notebook_id": None}
+                logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
+        except Exception as e:
+            logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
+            results["notebooklm"] = {"success": False, "error": str(e)}
+
+        # 로컬 마크다운 백업
+        try:
+            backup_dir = BASE_DIR / "data" / "newsletters"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            filepath = backup_dir / f"weekly_{date_str}.md"
+            filepath.write_text(markdown, encoding="utf-8")
+            results["backup"] = {"success": True, "path": str(filepath)}
+            logger.info("Weekly 로컬 백업 저장: %s", filepath)
+        except Exception as e:
+            logger.error("Weekly 로컬 백업 실패 (계속 진행): %s", e)
+            results["backup"] = {"success": False, "error": str(e)}
+
+        # ── 발송 이력 기록 ──
+        log_newsletter(
+            db, "weekly", 0, len(recipients), "success",
+            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
+        )
+
+        return jsonify({"success": True, "results": results})
 
     # ── 공통 ──
 
