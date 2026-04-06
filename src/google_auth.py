@@ -46,9 +46,13 @@ def get_google_credentials(
     # 토큰 갱신 또는 새로 발급
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            logger.info("토큰 갱신 중...")
-            creds.refresh(Request())
-        else:
+            try:
+                logger.info("토큰 갱신 중...")
+                creds.refresh(Request())
+            except Exception as e:
+                logger.warning("토큰 갱신 실패, 재인증 진행: %s", e)
+                creds = None
+        if not creds or not creds.valid:
             if not creds_file.exists():
                 raise FileNotFoundError(
                     f"Google OAuth2 클라이언트 시크릿 파일을 찾을 수 없습니다: {credentials_path}\n"
