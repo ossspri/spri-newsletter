@@ -13,13 +13,25 @@
 <section class="card card-collapsible">
   <div class="card-header">
     <h3>기사 미리보기</h3>
-    <button id="btn-preview-articles" class="btn btn-outline" onclick="previewArticles()">GNews 검색</button>
+    <button id="btn-preview-articles" class="btn btn-outline" onclick="showKeywordsDialog()">GNews 검색</button>
   </div>
   <div id="preview-articles-section" class="hidden">
     <div id="keywords-box" class="keywords-box"></div>
     <div id="preview-articles-list" class="article-list"></div>
   </div>
 </section>
+
+<!-- 검색 키워드 확인 다이얼로그 -->
+<div id="keywords-dialog" class="dialog-overlay hidden">
+  <div class="dialog-box">
+    <h4>GNews 검색 키워드</h4>
+    <div id="keywords-edit-list" class="keywords-edit-list"></div>
+    <div class="dialog-actions">
+      <button class="btn btn-primary" onclick="executeSearch()">검색 진행</button>
+      <button class="btn btn-secondary" onclick="closeKeywordsDialog()">취소</button>
+    </div>
+  </div>
+</div>
 
 <!-- Step 1: 뉴스 수집 -->
 <section class="card">
@@ -74,10 +86,56 @@
 <script>
   let currentMarkdown = '';
 
-  async function previewArticles() {
+  async function showKeywordsDialog() {
+    try {
+      const data = await apiCall('/daily/preview-keywords', { method: 'POST' });
+      const listEl = document.getElementById('keywords-edit-list');
+      listEl.innerHTML = data.queries.map((q, i) =>
+        '<div class="keyword-edit-row">' +
+          '<input type="text" class="input keyword-input" value="' + q.replace(/"/g, '&quot;') + '" data-index="' + i + '">' +
+          '<button class="btn btn-small" onclick="removeKeywordRow(this)">✕</button>' +
+        '</div>'
+      ).join('') +
+      '<button class="btn btn-small btn-outline" onclick="addKeywordRow()" style="margin-top:8px">+ 키워드 추가</button>';
+      document.getElementById('keywords-dialog').classList.remove('hidden');
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  function addKeywordRow() {
+    const container = document.getElementById('keywords-edit-list');
+    const addBtn = container.querySelector('.btn-outline');
+    const row = document.createElement('div');
+    row.className = 'keyword-edit-row';
+    row.innerHTML = '<input type="text" class="input keyword-input" value="">' +
+      '<button class="btn btn-small" onclick="removeKeywordRow(this)">✕</button>';
+    container.insertBefore(row, addBtn);
+  }
+
+  function removeKeywordRow(btn) {
+    btn.parentElement.remove();
+  }
+
+  function closeKeywordsDialog() {
+    document.getElementById('keywords-dialog').classList.add('hidden');
+  }
+
+  async function executeSearch() {
+    const inputs = document.querySelectorAll('#keywords-edit-list .keyword-input');
+    const queries = Array.from(inputs).map(el => el.value.trim()).filter(v => v);
+    if (queries.length === 0) {
+      showToast('검색 키워드를 입력하세요.', true);
+      return;
+    }
+    closeKeywordsDialog();
     showLoading('GNews에서 최근 24시간 기사를 검색 중...');
     try {
-      const data = await apiCall('/daily/preview-articles', { method: 'POST' });
+      const data = await apiCall('/daily/preview-articles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queries }),
+      });
       const section = document.getElementById('preview-articles-section');
       section.classList.remove('hidden');
 

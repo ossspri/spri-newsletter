@@ -22,6 +22,8 @@ from src.db import (
     get_daily_articles_today,
     get_all_manual_articles,
     clear_today_archive,
+    clear_today_daily_articles,
+    clear_all_manual_articles,
 )
 from src.news_service import GNewsService
 from src.claude_service import ClaudeService
@@ -111,21 +113,30 @@ def create_app(config: dict, db_conn) -> Flask:
         sent_today = check_today_sent(db, "daily")
         return render_template("daily.html", articles=articles, sent_today=sent_today)
 
+    @app.route("/daily/preview-keywords", methods=["POST"])
+    def daily_preview_keywords():
+        """GNews 검색에 사용될 키워드 목록을 반환한다."""
+        cfg = get_cfg()
+        queries = cfg.get("gnews", {}).get("queries", [])
+        return jsonify({"success": True, "queries": queries})
+
     @app.route("/daily/preview-articles", methods=["POST"])
     def daily_preview_articles():
-        """GNews API로 기사를 검색하여 한국어 번역 미리보기를 반환한다 (DB 저장 안 함)."""
+        """GNews API로 기사를 검색하여 미리보기를 반환한다 (DB 저장 안 함)."""
         try:
             cfg = get_cfg()
+            data = request.get_json() or {}
+            custom_queries = data.get("queries")
+
             gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
             gnews = GNewsService(cfg, gnews_api_key)
-            queries = cfg.get("gnews", {}).get("queries", [])
-            articles = gnews.fetch_articles()
 
-            # 기사 제목/설명을 한국어로 번역
-            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
-            if claude_api_key and articles:
-                claude = ClaudeService(cfg, claude_api_key)
-                articles = claude.translate_articles(articles)
+            # 사용자가 키워드를 수정한 경우 반영
+            if custom_queries is not None:
+                gnews.queries = custom_queries
+
+            queries = gnews.queries
+            articles = gnews.fetch_articles()
 
             return jsonify({
                 "success": True,
@@ -283,6 +294,23 @@ def create_app(config: dict, db_conn) -> Flask:
             total_count=len(articles) + len(manual_articles),
         )
 
+    @app.route("/weekly/translate-articles", methods=["POST"])
+    def weekly_translate_articles():
+        """선택된 기사의 제목/설명을 한국어로 번역한다."""
+        data = request.get_json() or {}
+        articles = data.get("articles", [])
+        if not articles:
+            return jsonify({"success": False, "error": "번역할 기사가 없습니다."}), 400
+
+        try:
+            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+            claude = ClaudeService(get_cfg(), claude_api_key)
+            translated = claude.translate_articles(articles)
+            return jsonify({"success": True, "articles": translated})
+        except Exception as e:
+            logger.error("기사 번역 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+
     @app.route("/weekly/add-article", methods=["POST"])
     def weekly_add_article():
         """수동 기사를 추가한다 (URL → 자동 메타 추출)."""
@@ -427,16 +455,23 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/reset-today", methods=["POST"])
     def reset_today():
-        """오늘 날짜의 기사 아카이브와 로컬 백업 파일을 초기화한다 (수동 테스트용).
+        """오늘 날짜의 기사·아카이브·백업·NotebookLM 소스를 초기화한다 (수동 테스트용).
 
         발송 이력(newsletter_log)은 보존한다.
         """
         try:
             db = get_db()
+            cfg = get_cfg()
             date_str = get_kst_date_str()
 
             # article_archive에서 오늘 데이터 삭제
             archive_deleted = clear_today_archive(db, date_str)
+
+            # daily_articles에서 오늘 수집 기사 삭제
+            daily_deleted = clear_today_daily_articles(db, date_str)
+
+            # manual_articles 전체 삭제
+            manual_deleted = clear_all_manual_articles(db)
 
             # 로컬 백업 파일 삭제
             backup_dir = BASE_DIR / "data" / "newsletters"
@@ -447,12 +482,29 @@ def create_app(config: dict, db_conn) -> Flask:
                     filepath.unlink()
                     files_deleted.append(pattern)
 
-            logger.info("테스트 초기화 완료: 아카이브 %d건, 파일 %s", archive_deleted, files_deleted)
+            # NotebookLM 소스 삭제
+            nlm_result = {"deleted_count": 0}
+            try:
+                nlm = NotebookLMService(cfg)
+                nlm_result = nlm.delete_today_sources(date_str)
+            except Exception as e:
+                logger.error("NotebookLM 소스 삭제 실패 (계속 진행): %s", e)
+                nlm_result = {"deleted_count": 0, "error": str(e)}
+
+            logger.info(
+                "테스트 초기화 완료: 아카이브 %d건, daily %d건, manual %d건, "
+                "파일 %s, NotebookLM %d건",
+                archive_deleted, daily_deleted, manual_deleted,
+                files_deleted, nlm_result["deleted_count"],
+            )
             return jsonify({
                 "success": True,
                 "date": date_str,
                 "archive_deleted": archive_deleted,
+                "daily_deleted": daily_deleted,
+                "manual_deleted": manual_deleted,
                 "files_deleted": files_deleted,
+                "nlm_deleted": nlm_result["deleted_count"],
             })
         except Exception as e:
             logger.error("테스트 초기화 실패: %s", e)

@@ -312,3 +312,44 @@ def clear_today_archive(db: SheetsDB, target_date: str) -> int:
 
     logger.info("아카이브 초기화 완료 (%s): %d건 삭제", target_date, len(rows_to_delete))
     return len(rows_to_delete)
+
+
+def clear_today_daily_articles(db: SheetsDB, target_date: str) -> int:
+    """오늘 수집된 daily_articles를 삭제한다.
+
+    Args:
+        db: SheetsDB 인스턴스
+        target_date: 삭제할 날짜 문자열 (YYYY-MM-DD)
+
+    Returns:
+        삭제된 행 수
+    """
+    ws = db.worksheet("daily_articles")
+    all_values = ws.get_all_values()
+    rows_to_delete = []
+    for i, row in enumerate(all_values):
+        if i == 0:
+            continue
+        collected_at = row[1] if len(row) > 1 else ""
+        if collected_at.startswith(target_date):
+            rows_to_delete.append(i + 1)
+    for row_num in reversed(rows_to_delete):
+        _retry(ws.delete_rows, row_num)
+
+    logger.info("daily_articles 초기화 완료 (%s): %d건 삭제", target_date, len(rows_to_delete))
+    return len(rows_to_delete)
+
+
+def clear_all_manual_articles(db: SheetsDB) -> int:
+    """manual_articles의 모든 기사를 삭제한다.
+
+    Returns:
+        삭제된 행 수
+    """
+    ws = db.worksheet("manual_articles")
+    all_values = ws.get_all_values()
+    count = len(all_values) - 1  # 헤더 제외
+    if count > 0:
+        _retry(ws.delete_rows, 2, count + 1)
+    logger.info("manual_articles 전체 삭제: %d건", count)
+    return max(count, 0)

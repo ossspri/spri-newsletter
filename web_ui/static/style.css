@@ -156,6 +156,23 @@ body {
 .btn-small { padding: 4px 10px; font-size: 12px; }
 .btn-group { display: flex; gap: 8px; }
 
+/* ── 다이얼로그 ── */
+.dialog-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.dialog-overlay.hidden { display: none; }
+.dialog-box {
+  background: #fff; border-radius: 12px; padding: 24px;
+  min-width: 400px; max-width: 520px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.dialog-box h4 { margin: 0 0 16px; font-size: 16px; }
+.dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.keyword-edit-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.keyword-edit-row .input { flex: 1; }
+
 /* ── 기사 목록 ── */
 .article-list { padding: 16px 20px; }
 .article-item {

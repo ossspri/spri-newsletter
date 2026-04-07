@@ -147,6 +147,48 @@ class NotebookLMService:
         logger.info("새 노트북 생성: id=%s, title=%s", nb.id, title)
         return nb.id
 
+    def delete_today_sources(self, date_str: str) -> dict:
+        """오늘 날짜의 노트북에서 소스를 모두 삭제한다.
+
+        Args:
+            date_str: 날짜 문자열 (YYYY-MM-DD)
+
+        Returns:
+            삭제 결과 dict (notebook_title, deleted_count)
+        """
+        return asyncio.run(self._delete_today_sources_async(date_str))
+
+    async def _delete_today_sources_async(self, date_str: str) -> dict:
+        """오늘 날짜 노트북의 소스를 비동기로 삭제한다."""
+        notebook_title = _get_monday_label(date_str, self.prefix)
+        logger.info("NotebookLM 소스 삭제 대상 노트북: %s", notebook_title)
+
+        async with await NotebookLMClient.from_storage() as client:
+            notebooks = await client.notebooks.list()
+            target = None
+            for nb in notebooks:
+                if nb.title == notebook_title:
+                    target = nb
+                    break
+
+            if not target:
+                logger.info("노트북 없음, 삭제 건너뜀: %s", notebook_title)
+                return {"notebook_title": notebook_title, "deleted_count": 0}
+
+            sources = await client.sources.list(target.id)
+            deleted = 0
+            for source in sources:
+                try:
+                    await client.sources.delete(target.id, source.id)
+                    deleted += 1
+                    logger.info("소스 삭제: %s", source.title or source.url)
+                except Exception as e:
+                    logger.warning("소스 삭제 실패 (계속 진행): %s - %s",
+                                   source.id, e)
+
+        logger.info("NotebookLM 소스 삭제 완료: %s, %d건", notebook_title, deleted)
+        return {"notebook_title": notebook_title, "deleted_count": deleted}
+
     def get_notebook_label(self, date_str: str) -> str:
         """날짜에 해당하는 노트북 레이블을 반환한다.
 

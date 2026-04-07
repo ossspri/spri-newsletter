@@ -14,6 +14,7 @@
       <span id="selection-counter" class="counter">0/25 선택</span>
       <button class="btn btn-small" onclick="selectAll()">전체 선택</button>
       <button class="btn btn-small" onclick="deselectAll()">전체 해제</button>
+      <button id="btn-translate" class="btn btn-small btn-outline" onclick="translateArticles()">한국어 번역</button>
     </div>
   </div>
 
@@ -32,6 +33,8 @@
                data-url="{{ a.url }}"
                data-description="{{ a.description }}"
                data-source="{{ a.source_name }}"
+               data-original-title="{{ a.original_title or a.title }}"
+               data-original-description="{{ a.original_description or a.description }}"
                onchange="updateCounter()">
         <div class="article-info">
           <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
@@ -113,9 +116,9 @@
     const checks = document.querySelectorAll('.article-check:checked');
     return Array.from(checks).map(cb => ({
       id: cb.dataset.id,
-      title: cb.dataset.title,
+      title: cb.dataset.originalTitle || cb.dataset.title,
       url: cb.dataset.url,
-      description: cb.dataset.description,
+      description: cb.dataset.originalDescription || cb.dataset.description,
       source_name: cb.dataset.source,
     }));
   }
@@ -139,6 +142,51 @@
   function deselectAll() {
     document.querySelectorAll('.article-check').forEach(cb => { cb.checked = false; });
     updateCounter();
+  }
+
+  async function translateArticles() {
+    const checkboxes = document.querySelectorAll('.article-check');
+    if (checkboxes.length === 0) {
+      showToast('번역할 기사가 없습니다.', true);
+      return;
+    }
+    const articles = Array.from(checkboxes).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.title,
+      url: cb.dataset.url,
+      description: cb.dataset.description,
+      source_name: cb.dataset.source,
+    }));
+    showLoading('기사 제목/설명을 한국어로 번역 중...');
+    try {
+      const data = await apiCall('/weekly/translate-articles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articles }),
+      });
+      const translated = data.articles;
+      checkboxes.forEach((cb, i) => {
+        if (i < translated.length) {
+          const a = translated[i];
+          cb.dataset.originalTitle = cb.dataset.title;
+          cb.dataset.originalDescription = cb.dataset.description;
+          cb.dataset.title = a.title;
+          cb.dataset.description = a.description || '';
+          const info = cb.closest('.article-item').querySelector('.article-info');
+          const titleEl = info.querySelector('.article-title a');
+          const descEl = info.querySelector('.article-desc');
+          if (titleEl) titleEl.textContent = a.title;
+          if (descEl) descEl.textContent = a.description || '';
+        }
+      });
+      document.getElementById('btn-translate').textContent = '번역 완료 ✓';
+      document.getElementById('btn-translate').disabled = true;
+      showToast('한국어 번역 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
   }
 
   async function addManualArticle() {
