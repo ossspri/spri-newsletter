@@ -37,7 +37,7 @@
 <section class="card">
   <div class="card-header">
     <h3>① 뉴스 수집</h3>
-    <button id="btn-fetch" class="btn btn-primary" onclick="fetchNews()">뉴스 수집 (24h)</button>
+    <button id="btn-fetch" class="btn btn-primary" onclick="fetchNews()">뉴스 수집</button>
   </div>
   <div id="articles-list" class="article-list">
     {% if articles %}
@@ -85,6 +85,7 @@
 {% block scripts %}
 <script>
   let currentMarkdown = '';
+  let previewedArticles = null;  // 미리보기 결과 캐시
 
   async function showKeywordsDialog() {
     try {
@@ -158,6 +159,7 @@
         ).join('') +
         '<p class="article-count">총 ' + data.count + '건 검색됨 (미리보기 전용, DB 미저장)</p>';
       }
+      previewedArticles = data.articles;
       showToast(data.count + '건 검색 완료');
     } catch (e) {
       showToast(e.message, true);
@@ -167,9 +169,19 @@
   }
 
   async function fetchNews() {
-    showLoading('뉴스를 수집하고 있습니다...');
+    if (previewedArticles) {
+      showLoading('미리보기 결과를 저장 중...');
+    } else {
+      showLoading('GNews에서 뉴스를 수집하고 있습니다...');
+    }
     try {
-      const data = await apiCall('/daily/fetch', { method: 'POST' });
+      const body = previewedArticles ? { articles: previewedArticles } : undefined;
+      const options = { method: 'POST' };
+      if (body) {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify(body);
+      }
+      const data = await apiCall('/daily/fetch', options);
       showToast(`${data.count}건 수집, ${data.inserted}건 신규 저장`);
       location.reload();
     } catch (e) {

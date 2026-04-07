@@ -150,11 +150,22 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/daily/fetch", methods=["POST"])
     def daily_fetch():
-        """GNews API로 뉴스를 수집한다."""
+        """GNews API로 뉴스를 수집한다.
+
+        요청 body에 articles가 포함되면 해당 기사를 직접 저장하고,
+        없으면 GNews API를 호출하여 수집한다.
+        """
         try:
-            gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
-            gnews = GNewsService(get_cfg(), gnews_api_key)
-            articles = gnews.fetch_articles()
+            data = request.get_json() or {}
+            prefetched = data.get("articles")
+
+            if prefetched:
+                articles = prefetched
+            else:
+                gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
+                gnews = GNewsService(get_cfg(), gnews_api_key)
+                articles = gnews.fetch_articles()
+
             inserted = insert_daily_articles(get_db(), articles)
             return jsonify({
                 "success": True,
