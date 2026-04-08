@@ -30,7 +30,9 @@ from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
 from src.drive_service import DriveService
-from src.notebooklm_service import NotebookLMService, check_nlm_auth
+from src.notebooklm_service import (
+    NotebookLMService, check_nlm_auth, reauth_nlm_open, reauth_nlm_save,
+)
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -415,15 +417,18 @@ def create_app(config: dict, db_conn) -> Flask:
         else:
             try:
                 articles = get_weekly_articles(db, days=7)
-                if articles:
+                manual = get_all_manual_articles(db)
+                all_articles = articles + manual
+                if all_articles:
                     nlm = NotebookLMService(cfg)
                     nlm_notebook = nlm.save_sources(
                         date_str,
-                        [{"title": a["title"], "url": a["url"]} for a in articles],
+                        [{"title": a["title"], "url": a["url"]} for a in all_articles],
                         markdown,
                     )
                     results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                    logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
+                    logger.info("Weekly NotebookLM 저장 완료: %s (수동 %d건 포함)",
+                                nlm_notebook, len(manual))
                 else:
                     results["notebooklm"] = {"success": True, "notebook_id": None}
                     logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
@@ -521,6 +526,46 @@ def create_app(config: dict, db_conn) -> Flask:
             return jsonify({"success": True, "valid": False,
                             "reason": f"체크 실패: {e}",
                             "login_date": None, "expires_in_hours": None})
+
+    @app.route("/nlm/reauth/open", methods=["POST"])
+    def nlm_reauth_open():
+        """NotebookLM 재인증 브라우저를 연다."""
+        result = reauth_nlm_open()
+        return jsonify(result)
+
+    @app.route("/nlm/reauth/save", methods=["POST"])
+    def nlm_reauth_save():
+        """NotebookLM 재인증 브라우저에서 쿠키를 저장하고 닫는다."""
+        result = reauth_nlm_save()
+        return jsonify(result)
+
+    @app.route("/nlm/save", methods=["POST"])
+    def nlm_save_weekly():
+        """Weekly 기사를 NotebookLM에 저장한다 (재인증 후 재시도용)."""
+        try:
+            db = get_db()
+            cfg = get_cfg()
+            date_str = get_kst_date_str()
+            data = request.get_json() or {}
+            markdown = data.get("markdown", "")
+
+            articles = get_weekly_articles(db, days=7)
+            manual = get_all_manual_articles(db)
+            all_articles = articles + manual
+            if not all_articles:
+                return jsonify({"success": True, "notebook_id": None})
+
+            nlm = NotebookLMService(cfg)
+            notebook_id = nlm.save_sources(
+                date_str,
+                [{"title": a["title"], "url": a["url"]} for a in all_articles],
+                markdown,
+            )
+            logger.info("NotebookLM 재시도 저장 완료: %s", notebook_id)
+            return jsonify({"success": True, "notebook_id": notebook_id})
+        except Exception as e:
+            logger.error("NotebookLM 재시도 저장 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)})
 
     @app.route("/preview", methods=["POST"])
     def preview():

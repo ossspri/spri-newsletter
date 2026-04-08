@@ -49,7 +49,7 @@
 
   <!-- 수동 기사 -->
   {% if manual_articles %}
-  <div class="date-group">
+  <div class="date-group" id="manual-articles-group">
     <h4 class="date-label">수동 추가 기사</h4>
     {% for a in manual_articles %}
     <div class="article-item selectable">
@@ -194,13 +194,51 @@
     if (!url) return;
     showLoading('URL 메타데이터를 추출 중...');
     try {
-      await apiCall('/weekly/add-article', {
+      const data = await apiCall('/weekly/add-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       });
+      const a = data.article;
+
+      // 수동 추가 기사 섹션이 없으면 생성
+      let manualGroup = document.getElementById('manual-articles-group');
+      if (!manualGroup) {
+        manualGroup = document.createElement('div');
+        manualGroup.id = 'manual-articles-group';
+        manualGroup.className = 'date-group';
+        manualGroup.innerHTML = '<h4 class="date-label">수동 추가 기사</h4>';
+        // add-article-form 바로 앞에 삽입
+        const addForm = document.querySelector('.add-article-form');
+        addForm.parentNode.insertBefore(manualGroup, addForm);
+      }
+
+      // 새 기사 항목을 DOM에 추가
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'article-item selectable';
+      const escapedTitle = a.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const escapedDesc = (a.description || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const escapedUrl = a.url.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      itemDiv.innerHTML = `
+        <label class="checkbox-label">
+          <input type="checkbox" class="article-check"
+                 data-id="manual-new-${Date.now()}"
+                 data-title="${escapedTitle}"
+                 data-url="${escapedUrl}"
+                 data-description="${escapedDesc}"
+                 data-source="수동 추가"
+                 onchange="updateCounter()">
+          <div class="article-info">
+            <div class="article-title"><a href="${escapedUrl}" target="_blank">${escapedTitle}</a></div>
+            <div class="article-desc">${escapedDesc}</div>
+          </div>
+        </label>
+      `;
+      manualGroup.appendChild(itemDiv);
+
+      document.getElementById('manual-url').value = '';
+      updateCounter();
       showToast('기사가 추가되었습니다.');
-      location.reload();
     } catch (e) {
       showToast(e.message, true);
     } finally {
@@ -268,15 +306,108 @@
       if (r.drive && r.drive.success) msg += ' · Drive 저장';
       else if (r.drive) msg += ' · Drive 실패';
       if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
+      else if (r.notebooklm && r.notebooklm.skipped) msg += ' · NotebookLM 인증 만료';
       else if (r.notebooklm) msg += ' · NotebookLM 실패';
       if (r.backup && r.backup.success) msg += ' · 로컬 백업';
       else if (r.backup) msg += ' · 백업 실패';
       showToast(msg);
-      location.reload();
+
+      // NotebookLM 인증 만료 시 재인증 안내
+      if (r.notebooklm && r.notebooklm.skipped) {
+        showNlmReauthPrompt(md);
+      } else {
+        location.reload();
+      }
     } catch (e) {
       showToast(e.message, true);
     } finally {
       hideLoading();
+    }
+  }
+
+  let nlmReauthMarkdown = '';
+
+  function showNlmReauthPrompt(markdown) {
+    nlmReauthMarkdown = markdown;
+
+    // 기존 프롬프트가 있으면 제거
+    const existing = document.getElementById('nlm-reauth-prompt');
+    if (existing) existing.remove();
+
+    const div = document.createElement('div');
+    div.id = 'nlm-reauth-prompt';
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+    div.innerHTML = `
+      <div style="background:white;border-radius:12px;padding:32px;max-width:420px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.2)">
+        <h3 style="margin:0 0 12px">NotebookLM 인증 만료</h3>
+        <p style="color:#666;margin:0 0 20px">뉴스레터 발간은 완료되었으나, NotebookLM 저장이 건너뛰어졌습니다.<br>재인증 후 저장할 수 있습니다.</p>
+        <button id="nlm-reauth-open-btn" onclick="nlmReauthOpen()"
+                style="background:#4285f4;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px">
+          브라우저 로그인 열기
+        </button>
+        <button id="nlm-reauth-save-btn" onclick="nlmReauthSave()"
+                style="background:#34a853;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px;display:none">
+          로그인 완료 / 저장
+        </button>
+        <button onclick="document.getElementById('nlm-reauth-prompt').remove();location.reload()"
+                style="background:#dadce0;color:#333;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px">
+          건너뛰기
+        </button>
+      </div>
+    `;
+    document.body.appendChild(div);
+  }
+
+  async function nlmReauthOpen() {
+    const btn = document.getElementById('nlm-reauth-open-btn');
+    btn.disabled = true;
+    btn.textContent = '브라우저 여는 중...';
+    try {
+      const data = await apiCall('/nlm/reauth/open', { method: 'POST' });
+      if (data.success) {
+        btn.textContent = '브라우저 열림';
+        document.getElementById('nlm-reauth-save-btn').style.display = 'inline-block';
+      } else {
+        showToast('재인증 브라우저 열기 실패: ' + data.error, true);
+        btn.disabled = false;
+        btn.textContent = '브라우저 로그인 열기';
+      }
+    } catch (e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = '브라우저 로그인 열기';
+    }
+  }
+
+  async function nlmReauthSave() {
+    const btn = document.getElementById('nlm-reauth-save-btn');
+    btn.disabled = true;
+    btn.textContent = '저장 중...';
+    try {
+      const saveResult = await apiCall('/nlm/reauth/save', { method: 'POST' });
+      if (!saveResult.success || !saveResult.valid) {
+        showToast('재인증 실패: ' + (saveResult.reason || '알 수 없음'), true);
+        btn.disabled = false;
+        btn.textContent = '로그인 완료 / 저장';
+        return;
+      }
+      showToast('재인증 성공! NotebookLM 저장 중...');
+      const nlmResult = await apiCall('/nlm/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: nlmReauthMarkdown }),
+      });
+      if (nlmResult.success) {
+        showToast('NotebookLM 저장 완료!');
+      } else {
+        showToast('NotebookLM 저장 실패: ' + nlmResult.error, true);
+      }
+      document.getElementById('nlm-reauth-prompt').remove();
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = '로그인 완료 / 저장';
     }
   }
 </script>

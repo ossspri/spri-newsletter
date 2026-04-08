@@ -105,6 +105,151 @@ async def _check_api():
         await client.notebooks.list()
 
 
+import queue
+import threading
+
+_reauth_thread = None
+_reauth_cmd_q = None   # Flask → Playwright 스레드
+_reauth_res_q = None   # Playwright 스레드 → Flask
+
+
+def _reauth_worker(cmd_q: queue.Queue, res_q: queue.Queue):
+    """Playwright 전용 스레드.  open/save/cleanup 명령을 처리한다."""
+    from playwright.sync_api import sync_playwright
+    from notebooklm.paths import get_storage_path, get_browser_profile_dir
+
+    pw = None
+    context = None
+    page = None
+    storage_path = None
+
+    def cleanup():
+        nonlocal pw, context, page
+        try:
+            if context:
+                context.close()
+        except Exception:
+            pass
+        try:
+            if pw:
+                pw.stop()
+        except Exception:
+            pass
+        pw = context = page = None
+
+    while True:
+        cmd = cmd_q.get()
+        if cmd == "open":
+            cleanup()
+            try:
+                storage_path = get_storage_path()
+                browser_profile = get_browser_profile_dir()
+                storage_path.parent.mkdir(parents=True, exist_ok=True)
+                browser_profile.mkdir(parents=True, exist_ok=True)
+
+                pw = sync_playwright().start()
+                context = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(browser_profile),
+                    headless=False,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--password-store=basic",
+                    ],
+                    ignore_default_args=["--enable-automation"],
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto("https://notebooklm.google.com/")
+                res_q.put({"success": True})
+            except Exception as e:
+                cleanup()
+                res_q.put({"success": False, "error": str(e)})
+
+        elif cmd == "save":
+            if not context or not page:
+                res_q.put({"success": False, "valid": False,
+                           "reason": "열려 있는 재인증 브라우저 없음"})
+                continue
+            try:
+                page.goto("https://accounts.google.com/", wait_until="load")
+                page.goto("https://notebooklm.google.com/", wait_until="load")
+
+                current_url = page.url
+                if "notebooklm.google.com" not in current_url:
+                    cleanup()
+                    res_q.put({"success": False, "valid": False,
+                               "reason": f"NotebookLM 로그인 미완료 (현재 URL: {current_url})"})
+                    continue
+
+                context.storage_state(path=str(storage_path))
+                cleanup()
+                res_q.put({"success": True, "_check_auth": True})
+            except Exception as e:
+                cleanup()
+                res_q.put({"success": False, "valid": False, "reason": str(e)})
+
+        elif cmd == "quit":
+            cleanup()
+            res_q.put({"done": True})
+            break
+
+
+def _ensure_worker():
+    """Playwright 워커 스레드가 없으면 시작한다."""
+    global _reauth_thread, _reauth_cmd_q, _reauth_res_q
+    if _reauth_thread and _reauth_thread.is_alive():
+        return
+    _reauth_cmd_q = queue.Queue()
+    _reauth_res_q = queue.Queue()
+    _reauth_thread = threading.Thread(
+        target=_reauth_worker, args=(_reauth_cmd_q, _reauth_res_q), daemon=True
+    )
+    _reauth_thread.start()
+
+
+def reauth_nlm_open() -> dict:
+    """Playwright 브라우저를 열어 Google 로그인 페이지를 표시한다.
+
+    사용자가 브라우저에서 로그인을 완료한 뒤 reauth_nlm_save()를 호출해야 한다.
+
+    Returns:
+        {"success": bool, "error": str|None}
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        return {"success": False, "error": "Playwright 미설치. pip install notebooklm[browser] && playwright install chromium"}
+
+    _ensure_worker()
+    _reauth_cmd_q.put("open")
+    result = _reauth_res_q.get(timeout=30)
+    if result.get("success"):
+        logger.info("NotebookLM 재인증 브라우저 열림")
+    else:
+        logger.error("NotebookLM 재인증 브라우저 열기 실패: %s", result.get("error"))
+    return result
+
+
+def reauth_nlm_save() -> dict:
+    """열려 있는 브라우저에서 인증 쿠키를 저장하고 브라우저를 닫는다.
+
+    Returns:
+        {"success": bool, "valid": bool, "reason": str}
+    """
+    if not _reauth_thread or not _reauth_thread.is_alive():
+        return {"success": False, "valid": False, "reason": "열려 있는 재인증 브라우저 없음"}
+
+    _reauth_cmd_q.put("save")
+    result = _reauth_res_q.get(timeout=30)
+
+    if result.get("_check_auth"):
+        auth = check_nlm_auth()
+        logger.info("NotebookLM 재인증 완료: %s", auth["reason"])
+        return {"success": True, **auth}
+
+    logger.error("NotebookLM 재인증 저장 실패: %s", result.get("reason"))
+    return result
+
+
 class NotebookLMService:
     """notebooklm-py를 사용한 NotebookLM 연동 서비스."""
 
