@@ -6,8 +6,12 @@ PRD 10: NotebookLM 저장 실패 시 에러 로그 기록, 파이프라인은 �
 notebooklm-py (https://github.com/teng-lin/notebooklm-py) 사용.
 """
 import asyncio
+import json
 import logging
+import os
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from notebooklm import NotebookLMClient
 
@@ -30,6 +34,75 @@ def _get_monday_label(date_str: str, prefix: str = "SPRi") -> str:
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     monday = dt - timedelta(days=dt.weekday())
     return f"{prefix}_{monday.year}_{monday.strftime('%m%d')}"
+
+
+_DEFAULT_STORAGE = Path(os.environ.get("USERPROFILE", "~")) / ".notebooklm" / "storage_state.json"
+
+
+def check_nlm_auth(storage_path: Path = _DEFAULT_STORAGE) -> dict:
+    """NotebookLM 인증 상태를 확인한다.
+
+    storage_state.json의 쿠키 만료를 검사하고, 쿠키가 유효하면
+    실제 API 호출(notebooks.list)로 인증을 검증한다.
+
+    Returns:
+        {"valid": bool, "reason": str, "login_date": str|None,
+         "expires_in_hours": float|None}
+    """
+    # 1) storage_state.json 존재 여부
+    if not storage_path.exists():
+        return {"valid": False, "reason": "storage_state.json 없음 — notebooklm login 필요",
+                "login_date": None, "expires_in_hours": None}
+
+    # 2) 쿠키 만료 검사
+    try:
+        data = json.loads(storage_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"valid": False, "reason": "storage_state.json 파싱 실패",
+                "login_date": None, "expires_in_hours": None}
+
+    now = time.time()
+    login_date = datetime.fromtimestamp(storage_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+
+    # 핵심 쿠키 중 가장 빨리 만료되는 것 확인
+    key_cookie_names = {"SID", "HSID", "SSID", "OSID", "SIDCC",
+                        "__Secure-1PSIDTS", "__Secure-1PSIDRTS"}
+    earliest_exp = float("inf")
+    for cookie in data.get("cookies", []):
+        if cookie["name"] in key_cookie_names and "google" in cookie.get("domain", ""):
+            exp = cookie.get("expires", 0)
+            if 0 < exp < earliest_exp:
+                earliest_exp = exp
+
+    if earliest_exp < now:
+        hours_ago = (now - earliest_exp) / 3600
+        return {"valid": False,
+                "reason": f"세션 쿠키 만료됨 ({hours_ago:.0f}시간 전) — notebooklm login 필요",
+                "login_date": login_date, "expires_in_hours": 0}
+
+    hours_left = (earliest_exp - now) / 3600
+
+    # 3) 실제 API 호출로 검증
+    try:
+        asyncio.run(_check_api())
+        return {"valid": True,
+                "reason": f"인증 유효 (만료까지 {hours_left:.0f}시간)",
+                "login_date": login_date, "expires_in_hours": round(hours_left, 1)}
+    except Exception as e:
+        err_msg = str(e)
+        if "Authentication expired" in err_msg or "Redirected to" in err_msg:
+            return {"valid": False,
+                    "reason": "세션 만료 (API 확인) — notebooklm login 필요",
+                    "login_date": login_date, "expires_in_hours": 0}
+        return {"valid": False,
+                "reason": f"API 호출 실패: {err_msg}",
+                "login_date": login_date, "expires_in_hours": round(hours_left, 1)}
+
+
+async def _check_api():
+    """경량 API 호출로 인증 유효성을 확인한다."""
+    async with await NotebookLMClient.from_storage() as client:
+        await client.notebooks.list()
 
 
 class NotebookLMService:

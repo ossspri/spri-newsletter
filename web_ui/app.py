@@ -30,7 +30,7 @@ from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
 from src.drive_service import DriveService
-from src.notebooklm_service import NotebookLMService
+from src.notebooklm_service import NotebookLMService, check_nlm_auth
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -256,25 +256,31 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("Drive 저장 실패 (계속 진행): %s", e)
             results["drive"] = {"success": False, "error": str(e)}
 
-        # ── Step 5: NotebookLM 저장 ──
+        # ── Step 5: NotebookLM 저장 (사전 인증 체크) ──
         nlm_notebook = None
-        try:
-            articles = get_daily_articles_today(db)
-            if articles:
-                nlm = NotebookLMService(cfg)
-                nlm_notebook = nlm.save_sources(
-                    date_str,
-                    [{"title": a["title"], "url": a["url"]} for a in articles],
-                    markdown,
-                )
-                results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                logger.info("NotebookLM 저장 완료: %s", nlm_notebook)
-            else:
-                results["notebooklm"] = {"success": True, "notebook_id": None}
-                logger.info("NotebookLM 건너뜀: 기사 없음")
-        except Exception as e:
-            logger.error("NotebookLM 저장 실패 (계속 진행): %s", e)
-            results["notebooklm"] = {"success": False, "error": str(e)}
+        auth_status = check_nlm_auth()
+        if not auth_status["valid"]:
+            logger.warning("NotebookLM 인증 만료, 건너뜀: %s", auth_status["reason"])
+            results["notebooklm"] = {"success": False, "error": auth_status["reason"],
+                                     "skipped": True}
+        else:
+            try:
+                articles = get_daily_articles_today(db)
+                if articles:
+                    nlm = NotebookLMService(cfg)
+                    nlm_notebook = nlm.save_sources(
+                        date_str,
+                        [{"title": a["title"], "url": a["url"]} for a in articles],
+                        markdown,
+                    )
+                    results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
+                    logger.info("NotebookLM 저장 완료: %s", nlm_notebook)
+                else:
+                    results["notebooklm"] = {"success": True, "notebook_id": None}
+                    logger.info("NotebookLM 건너뜀: 기사 없음")
+            except Exception as e:
+                logger.error("NotebookLM 저장 실패 (계속 진행): %s", e)
+                results["notebooklm"] = {"success": False, "error": str(e)}
 
         # ── 발송 이력 기록 ──
         log_newsletter(
@@ -422,25 +428,31 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
             results["drive"] = {"success": False, "error": str(e)}
 
-        # ── Step 5: NotebookLM 저장 + 로컬 백업 ──
+        # ── Step 5: NotebookLM 저장 + 로컬 백업 (사전 인증 체크) ──
         nlm_notebook = None
-        try:
-            articles = get_weekly_articles(db, days=7)
-            if articles:
-                nlm = NotebookLMService(cfg)
-                nlm_notebook = nlm.save_sources(
-                    date_str,
-                    [{"title": a["title"], "url": a["url"]} for a in articles],
-                    markdown,
-                )
-                results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
-            else:
-                results["notebooklm"] = {"success": True, "notebook_id": None}
-                logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
-        except Exception as e:
-            logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
-            results["notebooklm"] = {"success": False, "error": str(e)}
+        auth_status = check_nlm_auth()
+        if not auth_status["valid"]:
+            logger.warning("NotebookLM 인증 만료, 건너뜀: %s", auth_status["reason"])
+            results["notebooklm"] = {"success": False, "error": auth_status["reason"],
+                                     "skipped": True}
+        else:
+            try:
+                articles = get_weekly_articles(db, days=7)
+                if articles:
+                    nlm = NotebookLMService(cfg)
+                    nlm_notebook = nlm.save_sources(
+                        date_str,
+                        [{"title": a["title"], "url": a["url"]} for a in articles],
+                        markdown,
+                    )
+                    results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
+                    logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
+                else:
+                    results["notebooklm"] = {"success": True, "notebook_id": None}
+                    logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
+            except Exception as e:
+                logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
+                results["notebooklm"] = {"success": False, "error": str(e)}
 
         # 로컬 마크다운 백업
         try:
@@ -520,6 +532,18 @@ def create_app(config: dict, db_conn) -> Flask:
         except Exception as e:
             logger.error("테스트 초기화 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/nlm/status")
+    def nlm_status():
+        """NotebookLM 인증 상태를 반환한다."""
+        try:
+            result = check_nlm_auth()
+            return jsonify({"success": True, **result})
+        except Exception as e:
+            logger.error("NotebookLM 인증 체크 실패: %s", e)
+            return jsonify({"success": True, "valid": False,
+                            "reason": f"체크 실패: {e}",
+                            "login_date": None, "expires_in_hours": None})
 
     @app.route("/preview", methods=["POST"])
     def preview():

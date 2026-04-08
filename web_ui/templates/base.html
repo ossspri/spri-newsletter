@@ -13,6 +13,7 @@
       <nav class="tabs">
         <a href="{{ url_for('daily_page') }}" class="tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
         <a href="{{ url_for('weekly_page') }}" class="tab {% if active_tab == 'weekly' %}active{% endif %}">Weekly</a>
+        <span id="nlm-badge" class="nlm-badge nlm-checking" title="NotebookLM 인증 확인 중...">NLM: 확인 중</span>
         <button class="btn-reset" onclick="resetToday()" title="오늘 생성된 아카이브와 백업 파일을 삭제합니다 (발송 이력은 보존)">오늘 생성된 기사 삭제</button>
       </nav>
     </div>
@@ -56,6 +57,28 @@
         hideLoading();
       }
     }
+    async function checkNlmAuth() {
+      const badge = document.getElementById('nlm-badge');
+      try {
+        const resp = await fetch('/nlm/status');
+        const data = await resp.json();
+        if (data.valid) {
+          badge.className = 'nlm-badge nlm-ok';
+          badge.textContent = 'NLM: 유효';
+          badge.title = data.reason + (data.login_date ? ' (로그인: ' + data.login_date + ')' : '');
+        } else {
+          badge.className = 'nlm-badge nlm-expired';
+          badge.textContent = 'NLM: 만료';
+          badge.title = data.reason;
+        }
+      } catch {
+        badge.className = 'nlm-badge nlm-expired';
+        badge.textContent = 'NLM: 오류';
+        badge.title = '인증 상태 확인 실패';
+      }
+    }
+    checkNlmAuth();
+
     async function apiCall(url, options) {
       const resp = await fetch(url, options);
       const data = await resp.json();

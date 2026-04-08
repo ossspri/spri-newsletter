@@ -63,6 +63,34 @@ body {
   border-bottom-color: #fff;
 }
 
+/* ── NotebookLM 인증 배지 ── */
+.nlm-badge {
+  margin-left: 12px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: default;
+  white-space: nowrap;
+}
+.nlm-checking {
+  background: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.6);
+}
+.nlm-ok {
+  background: rgba(40,167,69,0.25);
+  color: #7dffaa;
+}
+.nlm-expired {
+  background: rgba(255,69,58,0.3);
+  color: #ff8a80;
+  animation: pulse-warn 2s ease-in-out infinite;
+}
+@keyframes pulse-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* ── 컨테이너 ── */
 .container {
   max-width: 1100px;
