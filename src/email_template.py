@@ -98,7 +98,7 @@ text-transform:uppercase; margin:0 0 8px 0;">\
 border-top:1px solid #eee;">
     {drive_button}
     <p style="font-size:11px; color:#999; margin:15px 0 0 0;">\
-SPRi 소프트웨어정책연구소 | 본 뉴스레터는 지난 24시간 기사의 자동검색 결과를 토대로 Claude가 자동생성하였습니다</p>
+SPRi 소프트웨어정책연구소 | 본 뉴스레터는 지난 24시간 기사API의 키워드 검색결과를 토대로 Claude가 자동생성하였습니다</p>
   </div>
 
 </div>
