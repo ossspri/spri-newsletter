@@ -29,6 +29,10 @@ newsletter:
 recipients:
   daily:
     - "hsy@spri.kr"
+    - "parkth@spri.kr"
+    - "hchoi@spri.kr"
+    - "ryucy@spri.kr"
+    - "younghwan.kwon@spri.kr"
   weekly:
     - "hsy@spri.kr"
 
