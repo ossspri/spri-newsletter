@@ -4,7 +4,7 @@ venv/
 .venv/
 
 # Credentials
-credentials/google_token.json
+credentials/
 
 # Data
 data/
