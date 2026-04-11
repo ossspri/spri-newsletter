@@ -71,6 +71,10 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
     logger = logging.getLogger(__name__)
     logger.info("Daily 파이프라인 시작")
 
+    if check_today_sent(db_conn, "daily"):
+        logger.info("오늘 Daily 이미 발송됨 - 파이프라인 스킵")
+        return
+
     date_str = get_kst_date_str()
     date_display = get_kst_display_date()
     recipients = config.get("recipients", {}).get("daily", [])
