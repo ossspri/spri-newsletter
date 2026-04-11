@@ -3,17 +3,23 @@
 PRD 4.1: 뉴스레터를 구글 문서로 생성하여 지정 Drive 폴더에 저장한다.
 PRD 10: Drive 저장 실패 시 로컬 마크다운 백업은 유지, 에러 로그 기록.
 """
+import json
 import logging
+import os
+import re
 
 from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
-# PRD 4.1 명명 규칙
-TITLE_TEMPLATES = {
-    "daily": "SPRi_일간브리핑_{date}",
-    "weekly": "SPRi_주간동향_{date}",
+# 타입별 단일 아카이브 문서 제목
+ARCHIVE_TITLE_TEMPLATES = {
+    "daily": "SPRi_일간브리핑_아카이브",
+    "weekly": "SPRi_주간동향_아카이브",
 }
+
+# 아카이브 문서 ID를 저장하는 로컬 상태 파일
+STATE_FILE = "data/drive_state.json"
 
 
 class DriveService:
@@ -28,6 +34,47 @@ class DriveService:
         self.drive_service = build("drive", "v3", credentials=credentials)
         self.docs_service = build("docs", "v1", credentials=credentials)
 
+    def _load_state(self) -> dict:
+        """아카이브 문서 ID 상태를 파일에서 읽는다."""
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _save_state(self, state: dict) -> None:
+        """아카이브 문서 ID 상태를 파일에 저장한다."""
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+
+    def _get_or_create_archive_doc(self, newsletter_type: str, folder_id: str) -> str:
+        """상태 파일에서 아카이브 문서 ID를 읽고, 없거나 삭제됐으면 새로 생성한다."""
+        state = self._load_state()
+        key = f"archive_doc_id_{newsletter_type}"
+
+        if key in state:
+            doc_id = state[key]
+            try:
+                self.drive_service.files().get(fileId=doc_id, fields="id").execute()
+                return doc_id
+            except Exception:
+                logger.warning("저장된 아카이브 문서를 찾을 수 없음, 새로 생성: %s", doc_id)
+
+        title = ARCHIVE_TITLE_TEMPLATES[newsletter_type]
+        doc = self.docs_service.documents().create(body={"title": title}).execute()
+        doc_id = doc["documentId"]
+        self.drive_service.files().update(
+            fileId=doc_id,
+            addParents=folder_id,
+            removeParents="root",
+            fields="id, parents",
+        ).execute()
+        logger.info("아카이브 문서 생성: title='%s', id=%s", title, doc_id)
+
+        state[key] = doc_id
+        self._save_state(state)
+        return doc_id
+
     def create_document(
         self,
         markdown_body: str,
@@ -35,7 +82,7 @@ class DriveService:
         date_str: str,
         folder_id: str,
     ) -> str:
-        """구글 문서를 생성하고 지정 폴더로 이동한다.
+        """뉴스레터를 아카이브 구글 문서에 누적 저장한다 (최신이 1페이지).
 
         Args:
             markdown_body: 뉴스레터 마크다운 본문
@@ -44,43 +91,43 @@ class DriveService:
             folder_id: Google Drive 폴더 ID
 
         Returns:
-            생성된 구글 문서 ID
+            아카이브 구글 문서 ID
 
         Raises:
             ValueError: newsletter_type이 유효하지 않을 때
             googleapiclient.errors.HttpError: API 호출 실패 시
         """
-        if newsletter_type not in TITLE_TEMPLATES:
+        if newsletter_type not in ARCHIVE_TITLE_TEMPLATES:
             raise ValueError(
                 f"유효하지 않은 뉴스레터 타입: {newsletter_type} (daily 또는 weekly만 허용)"
             )
 
-        title = TITLE_TEMPLATES[newsletter_type].format(date=date_str)
+        doc_id = self._get_or_create_archive_doc(newsletter_type, folder_id)
 
-        # Step 1: 빈 구글 문서 생성
-        doc = self.docs_service.documents().create(body={"title": title}).execute()
-        doc_id = doc["documentId"]
-        logger.info("구글 문서 생성: title='%s', id=%s", title, doc_id)
+        # 기존 콘텐츠 존재 여부 확인 (구분선 삽입 여부 결정)
+        doc = self.docs_service.documents().get(documentId=doc_id).execute()
+        body_content = doc.get("body", {}).get("content", [])
+        has_existing = bool(body_content) and body_content[-1].get("endIndex", 1) > 1
 
-        # Step 2: 헤더 + 본문 삽입 및 스타일링
-        self._insert_styled_content(doc_id, markdown_body, newsletter_type, date_str)
-        logger.info("구글 문서 본문 삽입 완료: %s", doc_id)
-
-        # Step 3: 지정 폴더로 이동
-        self.drive_service.files().update(
-            fileId=doc_id,
-            addParents=folder_id,
-            removeParents="root",
-            fields="id, parents",
-        ).execute()
-        logger.info("구글 문서 폴더 이동: folder_id=%s", folder_id)
+        # 최신 뉴스레터를 index 1에 삽입 → 기존 콘텐츠가 뒤로 밀림
+        self._insert_styled_content(
+            doc_id, markdown_body, newsletter_type, date_str, add_separator=has_existing
+        )
+        logger.info("아카이브 문서에 뉴스레터 prepend 완료: doc_id=%s", doc_id)
 
         return doc_id
 
     def _insert_styled_content(
-        self, doc_id: str, markdown_body: str, newsletter_type: str, date_str: str
+        self, doc_id: str, markdown_body: str, newsletter_type: str, date_str: str,
+        add_separator: bool = False,
     ) -> None:
-        """헤더, 구분선, 본문을 삽입하고 Google Docs 스타일을 적용한다."""
+        """헤더, 구분선, 본문을 삽입하고 Google Docs 스타일을 적용한다.
+
+        runDailyAutomation.js의 updateGoogleDocStyled() 방식을 참조:
+        - 마크다운 문법 제거 후 순수 텍스트만 삽입
+        - 출처 링크는 URL 제거, '· 제목' 형식으로 표시
+        - 메타라인: HEADING_4, 오른쪽 정렬, 하단 border (= horizontal rule 효과)
+        """
         if newsletter_type == "weekly":
             doc_title = "주간 SW 산업 동향 보고서"
             subtitle = "WEEKLY REPORT"
@@ -89,16 +136,33 @@ class DriveService:
             subtitle = "DAILY BRIEFING"
 
         header_line = f"소프트웨어정책연구소 · {subtitle}"
-        meta_line = f"발행일: {date_str} | Software Industry Analyst Agent by SPRi"
+        meta_line = f"분석일자: {date_str} | Software Industry Analyst Agent by SPRi"
 
-        # 본문 라인 파싱
-        body_lines = [line for line in markdown_body.split("\n") if line.strip()]
+        # 본문 라인 파싱: (원본_라인, 표시_텍스트) 쌍으로 구성
+        # 원본은 스타일 타입 판별에, 표시 텍스트는 실제 삽입에 사용
+        parsed_lines = []
+        for line in markdown_body.split("\n"):
+            if not line.strip():
+                continue
+            clean = re.sub(r'\*\*(.+?)\*\*', r'\1', line)      # **bold** → bold
+            clean = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', clean)   # [text](url) → text
+            clean = re.sub(r'^\* ', '', clean)                   # * prefix 제거
+            clean = re.sub(r'^#{1,3} ', '', clean)               # ## / ### prefix 제거
+            clean = clean.strip()
+            if not clean:
+                continue
+            if line.startswith("* ["):
+                clean = "· " + clean   # 출처 링크: dot prefix 추가 (JS 방식)
+            parsed_lines.append((line, clean))
 
-        # 전체 텍스트를 한 번에 삽입 (역순으로 index 1에 삽입하면 복잡하므로, 순서대로 구성)
-        all_lines = [doc_title, header_line, meta_line, ""] + body_lines
-        full_text = "\n".join(all_lines) + "\n"
+        # 삽입할 전체 텍스트 구성
+        display_texts = [doc_title, header_line, meta_line, ""] + [c for _, c in parsed_lines]
+        full_text = "\n".join(display_texts) + "\n"
 
-        # Step 1: 텍스트 삽입
+        if add_separator:
+            full_text += "\n" + "─" * 50 + "\n\n"
+
+        # Step 1: 텍스트 삽입 (index 1 → 기존 콘텐츠가 뒤로 밀려 prepend 효과)
         self.docs_service.documents().batchUpdate(
             documentId=doc_id,
             body={"requests": [{"insertText": {"location": {"index": 1}, "text": full_text}}]},
@@ -108,36 +172,44 @@ class DriveService:
         requests = []
         idx = 1  # 문서 내 현재 인덱스
 
-        for i, line in enumerate(all_lines):
-            line_len = len(line)
+        # 제목: TITLE, 파랑, 볼드, 가운데 정렬
+        title_end = idx + len(doc_title)
+        requests.append(self._style_paragraph(idx, title_end, "TITLE", "#1a73e8", True, "CENTER"))
+        idx = title_end + 1  # +1 for \n
+
+        # 부제: SUBTITLE, 회색, 가운데 정렬
+        header_end = idx + len(header_line)
+        requests.append(self._style_paragraph(idx, header_end, "SUBTITLE", "#70757a", False, "CENTER"))
+        idx = header_end + 1  # +1 for \n
+
+        # 메타: HEADING_4, 회색, 오른쪽 정렬, 하단 border (horizontal rule 효과)
+        meta_end = idx + len(meta_line)
+        requests.append(self._style_paragraph(idx, meta_end, "HEADING_4", "#70757a", False, "END"))
+        requests.append(self._style_text(idx, meta_end, "#70757a", False))
+        requests.append(self._style_paragraph_border_bottom(idx, meta_end))
+        idx = meta_end + 1  # +1 for \n
+
+        # 빈 줄 (len == 0)
+        idx += 1  # +1 for \n
+
+        # 본문 섹션
+        for orig_line, clean_line in parsed_lines:
+            line_len = len(clean_line)
             end_idx = idx + line_len
 
-            if i == 0:
-                # 제목: TITLE, 파랑, 볼드, 가운데 정렬
-                requests.append(self._style_paragraph(idx, end_idx, "TITLE", "#1a73e8", True, "CENTER"))
-            elif i == 1:
-                # 부제: SUBTITLE, 회색, 가운데 정렬
-                requests.append(self._style_paragraph(idx, end_idx, "SUBTITLE", "#70757a", False, "CENTER"))
-            elif i == 2:
-                # 메타: NORMAL, 회색, 가운데 정렬, 작은 글씨
-                requests.append(self._style_paragraph(idx, end_idx, "NORMAL_TEXT", "#70757a", False, "CENTER"))
-                requests.append(self._style_font_size(idx, end_idx, 9))
-            elif line.startswith("## "):
+            if orig_line.startswith("## ") or orig_line.startswith("### "):
                 # 섹션 헤더: HEADING_2, 배경색
                 requests.append(self._style_paragraph(idx, end_idx, "HEADING_2", "#202124", True, "START"))
                 requests.append(self._style_paragraph_bg(idx, end_idx, "#f1f3f4"))
-            elif line.startswith("* ["):
-                # 출처 링크: 작은 회색 텍스트
+            elif orig_line.startswith("* ["):
+                # 출처 링크: 회색, 11pt
                 requests.append(self._style_text(idx, end_idx, "#888888", False))
-                requests.append(self._style_font_size(idx, end_idx, 10))
-            elif line.startswith("**") and line.endswith("**"):
+                requests.append(self._style_font_size(idx, end_idx, 11))
+            elif re.match(r'^\*\*.+?\*\*', orig_line.strip()):
                 # 볼드 요약줄
                 requests.append(self._style_text(idx, end_idx, "#202124", True))
 
-            idx = end_idx + 1  # +1 for newline
-
-        # 제목 아래 구분선 삽입 (메타라인 이후)
-        # 구분선은 별도 처리가 복잡하므로 건너뜀
+            idx = end_idx + 1  # +1 for \n
 
         if requests:
             self.docs_service.documents().batchUpdate(
@@ -183,6 +255,24 @@ class DriveService:
         }
 
     @staticmethod
+    def _style_paragraph_border_bottom(start: int, end: int) -> dict:
+        """메타라인 하단에 border를 추가한다 (horizontal rule 효과, JS의 insertHorizontalRule 대응)."""
+        return {
+            "updateParagraphStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "paragraphStyle": {
+                    "borderBottom": {
+                        "color": {"color": {"rgbColor": {"red": 0.796, "green": 0.796, "blue": 0.796}}},
+                        "dashStyle": "SOLID",
+                        "padding": {"magnitude": 6, "unit": "PT"},
+                        "width": {"magnitude": 0.75, "unit": "PT"},
+                    }
+                },
+                "fields": "borderBottom",
+            }
+        }
+
+    @staticmethod
     def _style_paragraph_bg(start: int, end: int, color: str) -> dict:
         r, g, b = int(color[1:3], 16) / 255, int(color[3:5], 16) / 255, int(color[5:7], 16) / 255
         return {
@@ -197,18 +287,17 @@ class DriveService:
             }
         }
 
-    def build_title(self, newsletter_type: str, date_str: str) -> str:
-        """문서 제목을 생성한다 (PRD 4.1 명명 규칙).
+    def build_title(self, newsletter_type: str) -> str:
+        """아카이브 문서 제목을 반환한다.
 
         Args:
             newsletter_type: 'daily' 또는 'weekly'
-            date_str: 날짜 문자열 (YYYY-MM-DD)
 
         Returns:
-            생성된 문서 제목
+            아카이브 문서 제목
         """
-        if newsletter_type not in TITLE_TEMPLATES:
+        if newsletter_type not in ARCHIVE_TITLE_TEMPLATES:
             raise ValueError(
                 f"유효하지 않은 뉴스레터 타입: {newsletter_type}"
             )
-        return TITLE_TEMPLATES[newsletter_type].format(date=date_str)
+        return ARCHIVE_TITLE_TEMPLATES[newsletter_type]
