@@ -138,12 +138,18 @@ class DriveService:
         header_line = f"소프트웨어정책연구소 · {subtitle}"
         meta_line = f"분석일자: {date_str} | Software Industry Analyst Agent by SPRi"
 
-        # 본문 라인 파싱: (원본_라인, 표시_텍스트) 쌍으로 구성
+        # 본문 라인 파싱: (원본_라인, 표시_텍스트, url) 튜플로 구성
         # 원본은 스타일 타입 판별에, 표시 텍스트는 실제 삽입에 사용
+        # url은 출처 링크(* [제목](url))에서만 추출, 나머지는 None
         parsed_lines = []
         for line in markdown_body.split("\n"):
             if not line.strip():
                 continue
+            url = None
+            if line.startswith("* ["):
+                m = re.match(r'^\* \[.+?\]\((.+?)\)', line)
+                if m:
+                    url = m.group(1)
             clean = re.sub(r'\*\*(.+?)\*\*', r'\1', line)      # **bold** → bold
             clean = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', clean)   # [text](url) → text
             clean = re.sub(r'^\* ', '', clean)                   # * prefix 제거
@@ -153,10 +159,10 @@ class DriveService:
                 continue
             if line.startswith("* ["):
                 clean = "· " + clean   # 출처 링크: dot prefix 추가 (JS 방식)
-            parsed_lines.append((line, clean))
+            parsed_lines.append((line, clean, url))
 
         # 삽입할 전체 텍스트 구성
-        display_texts = [doc_title, header_line, meta_line, ""] + [c for _, c in parsed_lines]
+        display_texts = [doc_title, header_line, meta_line, ""] + [c for _, c, _ in parsed_lines]
         full_text = "\n".join(display_texts) + "\n"
 
         if add_separator:
@@ -171,6 +177,25 @@ class DriveService:
         # Step 2: 스타일링 요청 구성
         requests = []
         idx = 1  # 문서 내 현재 인덱스
+
+        # 삽입된 전체 블록을 NORMAL_TEXT로 초기화:
+        # prepend 시 기존 첫 단락(TITLE)의 스타일을 상속받기 때문에
+        # 명시적 스타일이 없는 줄(본문, 볼드 요약, 출처 링크)이 TITLE 크기로 표시되는 것을 방지
+        block_end = 1 + len(full_text)
+        requests.append({
+            "updateParagraphStyle": {
+                "range": {"startIndex": 1, "endIndex": block_end},
+                "paragraphStyle": {"namedStyleType": "NORMAL_TEXT", "alignment": "START"},
+                "fields": "namedStyleType,alignment",
+            }
+        })
+        requests.append({
+            "updateTextStyle": {
+                "range": {"startIndex": 1, "endIndex": block_end},
+                "textStyle": {"bold": False, "italic": False},
+                "fields": "bold,italic",
+            }
+        })
 
         # 제목: TITLE, 파랑, 볼드, 가운데 정렬
         title_end = idx + len(doc_title)
@@ -193,7 +218,7 @@ class DriveService:
         idx += 1  # +1 for \n
 
         # 본문 섹션
-        for orig_line, clean_line in parsed_lines:
+        for orig_line, clean_line, url in parsed_lines:
             line_len = len(clean_line)
             end_idx = idx + line_len
 
@@ -202,9 +227,12 @@ class DriveService:
                 requests.append(self._style_paragraph(idx, end_idx, "HEADING_2", "#202124", True, "START"))
                 requests.append(self._style_paragraph_bg(idx, end_idx, "#f1f3f4"))
             elif orig_line.startswith("* ["):
-                # 출처 링크: 회색, 11pt
+                # 출처 링크: 회색, 11pt, 하이퍼링크
                 requests.append(self._style_text(idx, end_idx, "#888888", False))
                 requests.append(self._style_font_size(idx, end_idx, 11))
+                if url and end_idx > idx + 2:
+                    # "· "는 2글자 → 그 이후 제목 텍스트에만 링크 적용
+                    requests.append(self._style_link(idx + 2, end_idx, url))
             elif re.match(r'^\*\*.+?\*\*', orig_line.strip()):
                 # 볼드 요약줄
                 requests.append(self._style_text(idx, end_idx, "#202124", True))
@@ -269,6 +297,16 @@ class DriveService:
                     }
                 },
                 "fields": "borderBottom",
+            }
+        }
+
+    @staticmethod
+    def _style_link(start: int, end: int, url: str) -> dict:
+        return {
+            "updateTextStyle": {
+                "range": {"startIndex": start, "endIndex": end},
+                "textStyle": {"link": {"url": url}},
+                "fields": "link",
             }
         }
 
