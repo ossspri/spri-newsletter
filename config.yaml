@@ -1,23 +1,70 @@
 # ── 뉴스 수집 ──
 gnews:
   queries:
-    # 기업/산업
-    - "artificial intelligence"
-    - "big tech AI"
-    - "software industry"
-    - "SaaS"
+    # 기업/산업 (시장·실적)
+    - '"big tech earnings"'
+    - '"enterprise software"'
+    - '"SaaS company"'
     # 정책/법제
-    - "AI regulation"
-    - "AI policy"
-    # 인력/교육
-    - "software developer AI"
-    # 기술/연구
-    - "AI model"
+    - '"AI regulation"'
+    # 기술/연구 (투자 관점)
+    - '"AI startup funding"'
+    - '"generative AI" enterprise'
     # 하드웨어/인프라
-    - "AI semiconductor"
-    - "AI datacenter"
+    - '"AI chip" OR "AI semiconductor"'
+    - '"AI datacenter"'
+    # 거시 (IPO/M&A)
+    - '"tech IPO" OR "software acquisition"'
   lang: "en"
-  max_per_query: 25
+  # 검색 범위를 제목/설명으로 제한 → 본문 우연 매칭 노이즈 제거
+  search_in: "title,description"
+  # 화이트리스트 필터링 후에도 충분한 기사 수 확보 위해 상향
+  max_per_query: 100
+  # 화이트리스트 — GNews 무료 API의 실제 source 분포를 기반으로 선정 (probe 결과).
+  # WSJ/FT/Barron's/MarketWatch/The Verge/Ars Technica 등은 GNews에서 거의 인덱싱되지
+  # 않아 제외(추가해도 매칭이 거의 없음). 빈 리스트면 필터링 비활성화.
+  source_whitelist:
+    # 글로벌 금융/시장
+    - "Reuters"
+    - "Bloomberg"
+    - "Bnn Bloomberg"
+    - "CNBC"
+    - "Seeking Alpha"
+    - "Benzinga"
+    - "MarketScreener"
+    - "Investor's Business Daily"
+    - "Business Insider"
+    - "Forbes"
+    - "Fortune"
+    # 글로벌 기술 매체 (시장/기업 관점)
+    - "TechCrunch"
+    - "TNW"
+    - "TechStartups.com"
+    - "iTWire"
+    # 인도 비즈니스 (GNews 영문 인덱스 비중 큼, SW/IT 산업 비중 높음)
+    - "The Economic Times"
+    - "Livemint"
+    - "The Hindu Business Line"
+    - "The Financial Express"
+    - "NDTV Profit"
+    - "CNBC TV18"
+    - "Moneycontrol"
+  # Fallback 가드: 최종 기사가 min_articles 미만이면 fallback_queries로 보충 수집.
+  # fallback 결과에도 화이트리스트가 적용되므로 노이즈 회귀 방지.
+  min_articles: 10
+  # 구체적 SW 기업/제품명 — 광범위 키워드보다 시그널/노이즈 비율이 훨씬 좋음
+  fallback_queries:
+    - "OpenAI"
+    - "Microsoft AI"
+    - "Google Cloud"
+    - "Amazon AWS"
+    - "Salesforce"
+    - "Oracle cloud"
+    - "NVIDIA AI"
+    - "Snowflake OR Databricks"
+    - "Meta AI"
+    - "Adobe AI"
+    - "ServiceNow"
 
 # ── 뉴스레터 ──
 newsletter:
@@ -29,10 +76,12 @@ newsletter:
 recipients:
   daily:
     - "hsy@spri.kr"
-    # - "parkth@spri.kr"
-    # - "hchoi@spri.kr"
-    # - "ryucy@spri.kr"
-    # - "younghwan.kwon@spri.kr"
+    - "parkth@spri.kr"
+    - "hchoi@spri.kr"
+    - "ryucy@spri.kr"
+    - "younghwan.kwon@spri.kr"
+    - "dahin.kim@spri.kr"
+    - "jeonjiyeon@spri.kr"
   weekly:
     - "hsy@spri.kr"
 

@@ -1,0 +1,20 @@
+# A/B 비교용 — 화이트리스트 도입 이전 (commit 231cd6d 기준) gnews 섹션 스냅샷.
+# scripts/compare_configs.py 가 이 파일을 "old" 설정으로 로드한다.
+gnews:
+  queries:
+    - "artificial intelligence"
+    - "big tech AI"
+    - "software industry"
+    - "SaaS"
+    - "AI regulation"
+    - "AI policy"
+    - "software developer AI"
+    - "AI model"
+    - "AI semiconductor"
+    - "AI datacenter"
+  lang: "en"
+  max_per_query: 25
+  # search_in 없음, source_whitelist 없음 (구 동작)
+
+newsletter:
+  max_articles: 25
