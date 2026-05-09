@@ -53,7 +53,7 @@ def setup_logging(config: dict) -> None:
     )
 
 
-def run_daily_pipeline(config: dict, db_conn) -> None:
+def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     """Daily 파이프라인 — PRD 7.2 11단계 실행.
 
     1. config.yaml, .env 로드 (완료 — main()에서 처리)
@@ -67,12 +67,15 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
     9. notebooklm-py → 기사 URL 저장 (Phase 5)
     10. Google Sheets → 발송 이력 기록
     11. 로컬 백업 → .md 파일 저장
+
+    Args:
+        cron: True이면 멱등성 가드 활성 (cron 트리거 전용). False이면 항상 실행.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Daily 파이프라인 시작")
+    logger.info("Daily 파이프라인 시작 (cron=%s)", cron)
 
-    if check_today_sent(db_conn, "daily"):
-        logger.info("오늘 Daily 이미 발송됨 - 파이프라인 스킵")
+    if cron and check_today_sent(db_conn, "daily"):
+        logger.info("오늘 Daily 이미 발송됨 - 파이프라인 스킵 (cron 멱등성 가드)")
         return
 
     date_str = get_kst_date_str()
@@ -114,15 +117,30 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
             logger.error("Claude API 실패 - 기사 목록만 발송: %s", e)
             markdown_body = _fallback_articles_markdown(articles)
 
-    # ── Step 6: 마크다운 → HTML 변환 ──
-    html_body = render_email_html(markdown_body, "daily", date_display)
+    # ── Step 6: Google 인증 + Drive 문서 생성 (이메일 링크 포함을 위해 선행) ──
+    creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+    token_path = str(BASE_DIR / "credentials" / "google_token.json")
+    creds = get_google_credentials(creds_path, token_path)
+
+    drive_doc_id = None
+    drive_doc_url = ""
+    try:
+        drive = DriveService(creds)
+        folder_id = config.get("drive", {}).get("folder_id", "")
+        drive_doc_id = drive.create_document(
+            markdown_body, "daily", date_str, folder_id
+        )
+        drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
+        logger.info("Drive 문서 생성: %s", drive_doc_id)
+    except Exception as e:
+        logger.error("Drive 저장 실패 (파이프라인 계속): %s", e)
+
+    # ── Step 7: 마크다운 → HTML 변환 ──
+    html_body = render_email_html(markdown_body, "daily", date_display, drive_doc_url)
     subject = build_email_subject("daily", date_str)
 
-    # ── Step 7: Gmail API 발송 ──
+    # ── Step 8: Gmail API 발송 ──
     try:
-        creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-        token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        creds = get_google_credentials(creds_path, token_path)
         gmail = GmailService(creds)
         gmail.send_email(recipients, subject, html_body)
         send_status = "success"
@@ -132,19 +150,6 @@ def run_daily_pipeline(config: dict, db_conn) -> None:
         send_status = "failed"
         error_msg = f"Gmail 발송 실패: {e}"
         logger.error(error_msg)
-
-    # ── Step 8: Google Drive API → 구글 문서 생성 ──
-    drive_doc_id = None
-    if send_status == "success":
-        try:
-            drive = DriveService(creds)
-            folder_id = config.get("drive", {}).get("folder_id", "")
-            drive_doc_id = drive.create_document(
-                markdown_body, "daily", date_str, folder_id
-            )
-            logger.info("Drive 문서 생성: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Drive 저장 실패 (파이프라인 계속): %s", e)
 
     # ── Step 9: 발송 이력 기록 ──
     nlm_notebook = None  # Daily는 NotebookLM 저장 생략 (Weekly 발간 시 저장)
@@ -233,6 +238,12 @@ def main():
         required=True,
         help="실행 모드: daily(전체 파이프라인), server(웹 UI), fetch-only(뉴스 수집만)",
     )
+    parser.add_argument(
+        "--cron",
+        action="store_true",
+        default=False,
+        help="cron 트리거 여부. 지정 시 멱등성 가드 활성화 (오늘 이미 발송된 경우 스킵)",
+    )
     args = parser.parse_args()
 
     # 환경변수 로드
@@ -255,7 +266,7 @@ def main():
 
     try:
         if args.mode == "daily":
-            run_daily_pipeline(config, db_conn)
+            run_daily_pipeline(config, db_conn, cron=args.cron)
         elif args.mode == "fetch-only":
             run_fetch_only(config, db_conn)
         elif args.mode == "server":

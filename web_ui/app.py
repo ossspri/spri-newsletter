@@ -225,10 +225,25 @@ def create_app(config: dict, db_conn) -> Flask:
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
         results = {"email": None, "drive": None, "notebooklm": None}
 
-        # ── Step 3: Gmail 발송 ──
+        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
+        drive_doc_id = None
+        drive_doc_url = ""
+        try:
+            folder_id = cfg.get("drive", {}).get("folder_id", "")
+            creds = get_google_credentials(creds_path, token_path)
+            drive = DriveService(creds)
+            drive_doc_id = drive.create_document(markdown, "daily", date_str, folder_id)
+            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
+            results["drive"] = {"success": True, "doc_id": drive_doc_id}
+            logger.info("Drive 저장 완료: %s", drive_doc_id)
+        except Exception as e:
+            logger.error("Drive 저장 실패 (계속 진행): %s", e)
+            results["drive"] = {"success": False, "error": str(e)}
+
+        # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("daily", [])
-            html_body = render_email_html(markdown, "daily", date_display)
+            html_body = render_email_html(markdown, "daily", date_display, drive_doc_url)
             subject = build_email_subject("daily", date_str)
 
             creds = get_google_credentials(creds_path, token_path)
@@ -244,19 +259,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 "error": f"이메일 발송 실패: {e}",
                 "results": results,
             }), 500
-
-        # ── Step 4: Google Drive 저장 ──
-        drive_doc_id = None
-        try:
-            folder_id = cfg.get("drive", {}).get("folder_id", "")
-            creds = get_google_credentials(creds_path, token_path)
-            drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "daily", date_str, folder_id)
-            results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Drive 저장 완료: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Drive 저장 실패 (계속 진행): %s", e)
-            results["drive"] = {"success": False, "error": str(e)}
 
         # Daily는 NotebookLM 저장 생략 (Weekly 발간 시 저장)
         nlm_notebook = None
@@ -374,10 +376,25 @@ def create_app(config: dict, db_conn) -> Flask:
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
         results = {"email": None, "drive": None, "notebooklm": None, "backup": None}
 
-        # ── Step 3: Gmail 발송 ──
+        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
+        drive_doc_id = None
+        drive_doc_url = ""
+        try:
+            folder_id = cfg.get("drive", {}).get("folder_id", "")
+            creds = get_google_credentials(creds_path, token_path)
+            drive = DriveService(creds)
+            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
+            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
+            results["drive"] = {"success": True, "doc_id": drive_doc_id}
+            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
+        except Exception as e:
+            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
+            results["drive"] = {"success": False, "error": str(e)}
+
+        # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("weekly", [])
-            html_body = render_email_html(markdown, "weekly", date_display)
+            html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
             subject = build_email_subject("weekly", date_str)
 
             creds = get_google_credentials(creds_path, token_path)
@@ -393,19 +410,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 "error": f"이메일 발송 실패: {e}",
                 "results": results,
             }), 500
-
-        # ── Step 4: Google Drive 저장 ──
-        drive_doc_id = None
-        try:
-            folder_id = cfg.get("drive", {}).get("folder_id", "")
-            creds = get_google_credentials(creds_path, token_path)
-            drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
-            results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
-            results["drive"] = {"success": False, "error": str(e)}
 
         # ── Step 5: NotebookLM 저장 + 로컬 백업 (사전 인증 체크) ──
         nlm_notebook = None
