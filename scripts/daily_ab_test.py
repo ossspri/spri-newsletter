@@ -28,6 +28,11 @@ import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Windows 기본 콘솔(cp949)에서 한글·em dash 출력 시 UnicodeEncodeError 방지.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 logger = logging.getLogger("daily_ab")
 
 GAS_DOC_ID = "15JU7SCw9PSMhLNsyLn0xyrL73i58y24nHFqK4c0N3yA"
@@ -71,7 +76,8 @@ def generate_aprime(date: str, out_path: Path) -> bool:
            "--out", str(out_path)]
     try:
         result = subprocess.run(cmd, cwd=PROJECT_ROOT, timeout=600,
-                                capture_output=True, text=True, encoding="utf-8")
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
         if result.returncode != 0:
             logger.error("[A′] 실행 실패 (exit %d): %s",
                          result.returncode, result.stderr[-500:])
@@ -96,7 +102,8 @@ def run_three_way(a_path: Path, aprime_path: Path, b_path: Path,
            "--out", str(out_html)]
     logger.info("3-way 비교 실행")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, timeout=300,
-                            capture_output=True, text=True, encoding="utf-8")
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
     if result.returncode != 0:
         logger.error("비교 실패: %s", result.stderr[-300:])
         return None
