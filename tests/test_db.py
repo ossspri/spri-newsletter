@@ -1,43 +1,35 @@
-"""tests/test_db.py — Google Sheets DB 모듈 테스트"""
+"""tests/test_db.py — 로컬 CSV DB 모듈 테스트"""
 from datetime import datetime, timedelta
-
-import pytest
+from unittest.mock import MagicMock
 
 from src.db import (
+    SHEET_HEADERS,
+    archive_articles,
+    check_today_sent,
+    get_all_manual_articles,
+    get_articles_for_date_range,
+    get_daily_articles_today,
+    get_existing_summaries,
+    get_weekly_articles,
     insert_daily_articles,
     insert_manual_article,
-    get_articles_for_date_range,
-    get_existing_summaries,
-    check_today_sent,
     log_newsletter,
-    archive_articles,
-    get_weekly_articles,
-    get_daily_articles_today,
-    get_all_manual_articles,
-    SHEET_HEADERS,
 )
 
 
 # ── 스키마 검증 ──
 
 class TestSchema:
-    def test_sheets_exist(self, db):
-        """4개 시트 탭이 존재한다."""
-        titles = {ws.title for ws in db.spreadsheet.worksheets()}
-        assert "daily_articles" in titles
-        assert "manual_articles" in titles
-        assert "article_archive" in titles
-        assert "newsletter_log" in titles
+    def test_tables_exist(self, db):
+        """4개 CSV 테이블이 존재한다."""
+        for name in SHEET_HEADERS:
+            assert db.table(name).path.exists()
 
     def test_daily_articles_headers(self, db):
-        headers = db.worksheet("daily_articles").row_values(1)
-        expected = SHEET_HEADERS["daily_articles"]
-        assert headers == expected
+        assert db.table("daily_articles").headers == SHEET_HEADERS["daily_articles"]
 
     def test_newsletter_log_headers(self, db):
-        headers = db.worksheet("newsletter_log").row_values(1)
-        expected = SHEET_HEADERS["newsletter_log"]
-        assert headers == expected
+        assert db.table("newsletter_log").headers == SHEET_HEADERS["newsletter_log"]
 
 
 # ── daily_articles CRUD ──
@@ -66,7 +58,7 @@ class TestDailyArticles:
         count = insert_daily_articles(db, articles)
         assert count == 2
 
-        records = db.worksheet("daily_articles").get_all_records()
+        records = db.table("daily_articles").rows()
         assert len(records) == 2
 
     def test_dedup_on_url(self, db):
@@ -76,7 +68,7 @@ class TestDailyArticles:
         count = insert_daily_articles(db, articles)
         assert count == 0
 
-        records = db.worksheet("daily_articles").get_all_records()
+        records = db.table("daily_articles").rows()
         assert len(records) == 2
 
     def test_partial_dedup(self, db):
@@ -96,7 +88,7 @@ class TestDailyArticles:
         count = insert_daily_articles(db, new_articles)
         assert count == 1
 
-        records = db.worksheet("daily_articles").get_all_records()
+        records = db.table("daily_articles").rows()
         assert len(records) == 3
 
 
@@ -105,7 +97,7 @@ class TestDailyArticles:
 class TestManualArticles:
     def test_insert_manual(self, db):
         insert_manual_article(db, "Manual Title", "https://manual.com/1", "desc")
-        records = db.worksheet("manual_articles").get_all_records()
+        records = db.table("manual_articles").rows()
         assert len(records) == 1
         assert records[0]["title"] == "Manual Title"
 
@@ -113,7 +105,7 @@ class TestManualArticles:
         insert_manual_article(db, "Title", "https://manual.com/1", "desc")
         result = insert_manual_article(db, "Title", "https://manual.com/1", "desc")
         assert result is False
-        records = db.worksheet("manual_articles").get_all_records()
+        records = db.table("manual_articles").rows()
         assert len(records) == 1
 
 
@@ -148,15 +140,20 @@ class TestDateRange:
 
 class TestExistingSummaries:
     def test_empty_when_no_archive(self, db):
-        summaries = get_existing_summaries(db)
-        assert summaries == ""
+        assert get_existing_summaries(db) == ""
 
     def test_returns_titles_from_archive(self, db):
-        ws = db.worksheet("article_archive")
-        ws.append_row([1, "2026-03-28", "daily", "개요",
-                        "**AI 혁명이 SW 산업 변화를 가속화**", "https://example.com/1", ""])
-        ws.append_row([2, "2026-03-28", "daily", "기업/산업",
-                        "**빅테크 AI 투자 확대**", "https://example.com/2", ""])
+        archive_articles(
+            db, "2026-03-28", "daily",
+            [
+                {"section": "개요",
+                 "title": "**AI 혁명이 SW 산업 변화를 가속화**",
+                 "url": "https://example.com/1"},
+                {"section": "기업/산업",
+                 "title": "**빅테크 AI 투자 확대**",
+                 "url": "https://example.com/2"},
+            ],
+        )
 
         summaries = get_existing_summaries(db)
         assert "AI 혁명이 SW 산업 변화를 가속화" in summaries
@@ -170,22 +167,67 @@ class TestCheckTodaySent:
         assert check_today_sent(db, "daily") is False
 
     def test_true_when_sent_today(self, db):
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        ws = db.worksheet("newsletter_log")
-        ws.append_row([1, now, "daily", 10, 5, "success", "", "", ""])
+        log_newsletter(db, "daily", 10, 5, "success")
         assert check_today_sent(db, "daily") is True
 
     def test_false_for_different_type(self, db):
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        ws = db.worksheet("newsletter_log")
-        ws.append_row([1, now, "weekly", 10, 5, "success", "", "", ""])
+        log_newsletter(db, "weekly", 10, 5, "success")
         assert check_today_sent(db, "daily") is False
 
     def test_false_for_failed_status(self, db):
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        ws = db.worksheet("newsletter_log")
-        ws.append_row([1, now, "daily", 10, 5, "failed", "", "", ""])
+        log_newsletter(db, "daily", 10, 5, "failed")
         assert check_today_sent(db, "daily") is False
+
+
+# ── check_today_sent: Gmail 위임 (PR#2) ──
+
+class TestCheckTodaySentGmail:
+    """``db.attach_gmail`` 주입 시 Gmail Sent 검색을 진실의 원천으로 사용한다."""
+
+    def test_gmail_true_returns_true_even_if_csv_empty(self, db):
+        """Gmail이 발송됨 → True (로컬 CSV가 비어있어도)."""
+        gmail = MagicMock()
+        gmail.search_sent_today.return_value = True
+        db.attach_gmail(gmail)
+
+        assert check_today_sent(db, "daily") is True
+        gmail.search_sent_today.assert_called_once()
+
+    def test_gmail_false_returns_false_even_if_csv_says_sent(self, db):
+        """Gmail이 미발송 → False (CSV가 success로 잘못 갖고 있어도 Gmail 신뢰)."""
+        gmail = MagicMock()
+        gmail.search_sent_today.return_value = False
+        db.attach_gmail(gmail)
+        log_newsletter(db, "daily", 10, 5, "success")  # CSV에는 발송 기록 있음
+
+        assert check_today_sent(db, "daily") is False
+
+    def test_gmail_failure_falls_back_to_csv(self, db):
+        """Gmail 호출 실패 → CSV fallback."""
+        gmail = MagicMock()
+        gmail.search_sent_today.side_effect = Exception("Gmail down")
+        db.attach_gmail(gmail)
+        log_newsletter(db, "daily", 10, 5, "success")
+
+        assert check_today_sent(db, "daily") is True  # CSV 기준
+
+    def test_no_gmail_uses_csv(self, db):
+        """GmailService 미주입 시 CSV 그대로 사용."""
+        log_newsletter(db, "daily", 10, 5, "success")
+        assert check_today_sent(db, "daily") is True
+
+    def test_gmail_called_with_today_kst_date(self, db):
+        """Gmail 검색 호출 인자: type + 오늘(KST) YYYY-MM-DD."""
+        gmail = MagicMock()
+        gmail.search_sent_today.return_value = False
+        db.attach_gmail(gmail)
+
+        check_today_sent(db, "weekly")
+
+        args = gmail.search_sent_today.call_args.args
+        assert args[0] == "weekly"
+        # YYYY-MM-DD 형식
+        assert len(args[1]) == 10 and args[1][4] == "-" and args[1][7] == "-"
 
 
 # ── log_newsletter ──
@@ -193,7 +235,7 @@ class TestCheckTodaySent:
 class TestLogNewsletter:
     def test_log_success(self, db):
         log_newsletter(db, "daily", 15, 3, "success")
-        records = db.worksheet("newsletter_log").get_all_records()
+        records = db.table("newsletter_log").rows()
         assert len(records) == 1
         assert records[0]["recipient_count"] == 3
 
@@ -202,7 +244,7 @@ class TestLogNewsletter:
             db, "weekly", 20, 5, "success",
             drive_doc_id="doc_123", nlm_notebook="SPRi_2026_0330",
         )
-        records = db.worksheet("newsletter_log").get_all_records()
+        records = db.table("newsletter_log").rows()
         assert records[0]["drive_doc_id"] == "doc_123"
         assert records[0]["nlm_notebook"] == "SPRi_2026_0330"
 
@@ -217,28 +259,31 @@ class TestArchiveArticles:
         ]
         archive_articles(db, "2026-03-29", "daily", articles_data)
 
-        records = db.worksheet("article_archive").get_all_records()
+        records = db.table("article_archive").rows()
         assert len(records) == 2
 
 
-# ── get_weekly_articles (7일간 기사) ──
+# ── get_weekly_articles ──
 
 class TestGetWeeklyArticles:
     def test_returns_7_days(self, db):
         today = datetime.now()
-        ws = db.worksheet("daily_articles")
         for i in range(10):
             d = today - timedelta(days=i)
-            ws.append_row([
-                i + 1, d.strftime("%Y-%m-%dT%H:%M:%S"),
-                f"Article {i}", f"https://example.com/{i}",
-                "desc", "Src", d.strftime("%Y-%m-%dT%H:%M:%SZ"), "",
-            ])
+            db.table("daily_articles").append({
+                "id": str(i + 1),
+                "collected_at": d.strftime("%Y-%m-%dT%H:%M:%S"),
+                "title": f"Article {i}",
+                "url": f"https://example.com/{i}",
+                "description": "desc",
+                "source_name": "Src",
+                "published_at": d.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "used_in": "",
+            })
 
         results = get_weekly_articles(db)
         # 7일 timedelta 기준: 오늘 포함 최대 8건 (경계 시각에 따라 7~8)
-        assert len(results) <= 8
-        assert len(results) >= 7
+        assert 7 <= len(results) <= 8
 
 
 # ── get_daily_articles_today ──
@@ -247,11 +292,20 @@ class TestGetDailyArticlesToday:
     def test_returns_today_only(self, db):
         today = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        ws = db.worksheet("daily_articles")
-        ws.append_row([1, today, "Today Article", "https://example.com/today",
-                        "desc", "Src", today, ""])
-        ws.append_row([2, yesterday, "Yesterday Article", "https://example.com/yesterday",
-                        "desc", "Src", yesterday, ""])
+        for collected, title, url in [
+            (today, "Today Article", "https://example.com/today"),
+            (yesterday, "Yesterday Article", "https://example.com/yesterday"),
+        ]:
+            db.table("daily_articles").append({
+                "id": "1",
+                "collected_at": collected,
+                "title": title,
+                "url": url,
+                "description": "desc",
+                "source_name": "Src",
+                "published_at": collected,
+                "used_in": "",
+            })
 
         results = get_daily_articles_today(db)
         assert len(results) == 1
@@ -262,9 +316,18 @@ class TestGetDailyArticlesToday:
 
 class TestGetAllManualArticles:
     def test_returns_all_sorted(self, db):
-        ws = db.worksheet("manual_articles")
-        ws.append_row([1, "2026-03-28T10:00:00", "Older", "https://a.com/1", "d", "expert"])
-        ws.append_row([2, "2026-03-29T10:00:00", "Newer", "https://a.com/2", "d", "expert"])
+        for added_at, title, url in [
+            ("2026-03-28T10:00:00", "Older", "https://a.com/1"),
+            ("2026-03-29T10:00:00", "Newer", "https://a.com/2"),
+        ]:
+            db.table("manual_articles").append({
+                "id": "1",
+                "added_at": added_at,
+                "title": title,
+                "url": url,
+                "description": "d",
+                "added_by": "expert",
+            })
 
         results = get_all_manual_articles(db)
         assert len(results) == 2

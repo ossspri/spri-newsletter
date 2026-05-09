@@ -11,7 +11,7 @@ from main import (
     _save_local_backup,
     load_config,
 )
-from tests.conftest import create_fake_sheets_db
+from src.db import FileDB
 
 
 SAMPLE_CONFIG = {
@@ -58,9 +58,9 @@ SAMPLE_MARKDOWN = """\
 
 
 @pytest.fixture
-def db_conn():
-    """인메모리 SheetsDB."""
-    return create_fake_sheets_db()
+def db_conn(tmp_path):
+    """임시 디렉토리 기반 FileDB."""
+    return FileDB(tmp_path / "db")
 
 
 class TestDailyPipeline:
@@ -144,7 +144,7 @@ class TestDailyPipeline:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["status"] == "success"
 
     @patch("main.GNewsService")
@@ -157,7 +157,7 @@ class TestDailyPipeline:
 
         run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[0]["status"] == "failed"
         assert "GNews" in records[0]["error_message"]
 
@@ -233,7 +233,7 @@ class TestDailyPipeline:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["status"] == "failed"
 
         mock_drive.create_document.assert_not_called()
@@ -309,7 +309,7 @@ class TestDailyPipeline:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("article_archive").get_all_records()
+        records = db_conn.table("article_archive").rows()
         assert len(records) == 2
 
     @patch("main.NotebookLMService")
@@ -348,7 +348,7 @@ class TestDailyPipeline:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 2
 
     @patch("main.NotebookLMService")
@@ -405,7 +405,7 @@ class TestFetchOnly:
 
         run_fetch_only(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 2
 
     @patch("main.GNewsService")
@@ -418,7 +418,7 @@ class TestFetchOnly:
 
         run_fetch_only(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 0
 
     @patch("main.GNewsService")
@@ -520,7 +520,7 @@ class TestDriveIntegration:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["drive_doc_id"] == "doc_phase5"
 
     @patch("main.NotebookLMService")
@@ -559,7 +559,7 @@ class TestDriveIntegration:
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["status"] == "success"
         assert records[-1]["drive_doc_id"] == ""
 

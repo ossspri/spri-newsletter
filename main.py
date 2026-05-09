@@ -74,6 +74,9 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     logger = logging.getLogger(__name__)
     logger.info("Daily 파이프라인 시작 (cron=%s)", cron)
 
+    # cron 가드가 Gmail Sent를 진실의 원천으로 사용하도록 먼저 주입.
+    _try_attach_gmail(config, db_conn)
+
     if cron and check_today_sent(db_conn, "daily"):
         logger.info("오늘 Daily 이미 발송됨 - 파이프라인 스킵 (cron 멱등성 가드)")
         return
@@ -203,6 +206,8 @@ def run_server(config: dict, db_conn) -> None:
     host = web_cfg.get("host", "127.0.0.1")
     port = web_cfg.get("port", 5000)
 
+    _try_attach_gmail(config, db_conn)
+
     app = create_app(config, db_conn)
     logger.info("웹 UI 서버 시작: http://%s:%d", host, port)
     app.run(host=host, port=port, debug=True)
@@ -228,6 +233,27 @@ def _save_local_backup(markdown: str, newsletter_type: str, date_str: str) -> No
     filepath = backup_dir / filename
     filepath.write_text(markdown, encoding="utf-8")
     logger.info("로컬 백업 저장: %s", filepath)
+
+
+def _try_attach_gmail(config: dict, db_conn) -> None:
+    """``features.gmail_dedup`` 활성 시 GmailService를 db_conn에 주입.
+
+    ``check_today_sent`` 가 Gmail Sent를 진실의 원천으로 사용해 멀티 PC
+    이중 발송을 막는다. creds 로드/Gmail 초기화 실패 시 warn 로그만 남기고
+    CSV fallback으로 진행 (단일 PC 환경에서도 안전).
+    """
+    logger = logging.getLogger(__name__)
+    if not config.get("features", {}).get("gmail_dedup", True):
+        logger.info("Gmail dedup 비활성 (config flag) — CSV fallback")
+        return
+    try:
+        creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+        token_path = str(BASE_DIR / "credentials" / "google_token.json")
+        creds = get_google_credentials(creds_path, token_path)
+        db_conn.attach_gmail(GmailService(creds))
+        logger.info("Gmail dedup 활성")
+    except Exception as e:
+        logger.warning("Gmail dedup 비활성 (creds/Gmail 초기화 실패: %s) — CSV fallback", e)
 
 
 def main():
@@ -257,12 +283,9 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("SPRi 뉴스레터 시스템 시작 (mode=%s)", args.mode)
 
-    # DB 초기화 (Google Sheets)
-    creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
-    token_path = str(BASE_DIR / "credentials" / "google_token.json")
-    creds = get_google_credentials(creds_path, token_path)
-    spreadsheet_id = config.get("google_sheets", {}).get("spreadsheet_id", "")
-    db_conn = init_db(spreadsheet_id, creds)
+    # DB 초기화 (로컬 CSV)
+    data_dir = BASE_DIR / "data" / "db"
+    db_conn = init_db(data_dir)
 
     try:
         if args.mode == "daily":

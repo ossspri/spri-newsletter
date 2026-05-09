@@ -102,6 +102,12 @@ web_ui:
   host: "127.0.0.1"
   port: 5000
 
+# ── Feature flags ──
+features:
+  # check_today_sent을 Gmail Sent 검색으로 위임 (멀티 PC에서도 안전).
+  # false 또는 GmailService 미주입 시 newsletter_log.csv로 fallback.
+  gmail_dedup: true
+
 # ── 로깅 ──
 logging:
   level: "INFO"

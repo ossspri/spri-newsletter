@@ -4,9 +4,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.db import insert_daily_articles, log_newsletter
+from src.db import FileDB, insert_daily_articles, log_newsletter
 from web_ui.app import create_app
-from tests.conftest import create_fake_sheets_db
 
 
 SAMPLE_CONFIG = {
@@ -58,9 +57,9 @@ SAMPLE_MARKDOWN = """\
 
 
 @pytest.fixture
-def db_conn():
-    """인메모리 SheetsDB."""
-    return create_fake_sheets_db()
+def db_conn(tmp_path):
+    """임시 디렉토리 기반 FileDB."""
+    return FileDB(tmp_path / "db")
 
 
 @pytest.fixture
