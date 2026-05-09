@@ -186,6 +186,16 @@ def main() -> None:
     b_path = PROJECT_ROOT / "logs" / f"newsletterB_{date}.md"
     aprime_path = PROJECT_ROOT / "logs" / f"newsletterA-prime_{date}.md"
     three_html = PROJECT_ROOT / "logs" / f"nl_compare_3way_{date}.html"
+    summary_path = Path(args.summary_out) if args.summary_out else (
+        PROJECT_ROOT / "logs" / f"ab_summary_{date}.md"
+    )
+
+    # 멱등성: 오늘자 요약이 이미 있으면 스킵 (recovery trigger 중복 호출 방지).
+    # --force-aprime 또는 명시적 --summary-out이 지정되면 그대로 진행.
+    if (summary_path.exists() and not args.force_aprime
+            and args.summary_out is None):
+        logger.info("이미 오늘자 ab_summary 존재, 스킵: %s", summary_path)
+        return
 
     # 1. GAS B 추출 (이미 있으면 스킵)
     if not b_path.exists():
@@ -209,11 +219,8 @@ def main() -> None:
     # 3. 3-way 비교 (A vs A′ vs B)
     three = run_three_way(a_path, aprime_path, b_path, three_html)
 
-    # 4. 요약 저장 + 출력
+    # 4. 요약 저장 + 출력 (summary_path는 위에서 이미 정의됨)
     summary = render_summary(date, three)
-    summary_path = Path(args.summary_out) if args.summary_out else (
-        PROJECT_ROOT / "logs" / f"ab_summary_{date}.md"
-    )
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(summary, encoding="utf-8")
     print()
