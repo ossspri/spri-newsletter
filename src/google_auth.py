@@ -12,9 +12,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 logger = logging.getLogger(__name__)
 
-# PRD 9.1: gmail.send, drive.file, documents
+# PRD 9.1 + PR#2: gmail.send (발송), gmail.metadata (Sent dedup messages.list),
+# drive.file + documents (Drive 누적 아카이브), spreadsheets (legacy, 제거 예정).
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.metadata",
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/spreadsheets",

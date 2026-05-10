@@ -13,6 +13,10 @@ class TestScopes:
     def test_scopes_include_gmail_send(self):
         assert "https://www.googleapis.com/auth/gmail.send" in SCOPES
 
+    def test_scopes_include_gmail_metadata(self):
+        """PR#2: Gmail Sent dedup의 messages.list 호출에 필요."""
+        assert "https://www.googleapis.com/auth/gmail.metadata" in SCOPES
+
     def test_scopes_include_drive_file(self):
         assert "https://www.googleapis.com/auth/drive.file" in SCOPES
 
@@ -20,7 +24,7 @@ class TestScopes:
         assert "https://www.googleapis.com/auth/documents" in SCOPES
 
     def test_scopes_count(self):
-        assert len(SCOPES) == 4
+        assert len(SCOPES) == 5
 
     def test_spreadsheets_scope(self):
         assert "https://www.googleapis.com/auth/spreadsheets" in SCOPES
