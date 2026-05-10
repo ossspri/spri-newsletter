@@ -13,9 +13,10 @@ class TestScopes:
     def test_scopes_include_gmail_send(self):
         assert "https://www.googleapis.com/auth/gmail.send" in SCOPES
 
-    def test_scopes_include_gmail_metadata(self):
-        """PR#2: Gmail Sent dedup의 messages.list 호출에 필요."""
-        assert "https://www.googleapis.com/auth/gmail.metadata" in SCOPES
+    def test_scopes_include_gmail_readonly(self):
+        """PR#2: Gmail Sent dedup의 messages.list q 검색에 필요.
+        gmail.metadata는 q 파라미터를 거부하므로 readonly 사용."""
+        assert "https://www.googleapis.com/auth/gmail.readonly" in SCOPES
 
     def test_scopes_include_drive_file(self):
         assert "https://www.googleapis.com/auth/drive.file" in SCOPES
