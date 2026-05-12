@@ -6,6 +6,7 @@ from src.prompts import (
     build_postprocess_prompt,
     build_weekly_prompt,
     format_articles_for_prompt,
+    format_reports_for_prompt,
 )
 
 
@@ -199,3 +200,82 @@ class TestBuildPostprocessPrompt:
         prompt = build_postprocess_prompt("body")
         # 부가 안내문 금지 (build_daily_prompt와 일관)
         assert "리포트 본문 외에" in prompt or "다른 텍스트" in prompt or "안내 문구를 포함하지" in prompt
+
+
+# ── PR3: 수동 보고서 reports 인자 ──
+
+
+SAMPLE_REPORTS = [
+    {
+        "title": "IBM AI Index 2026",
+        "url": "https://example.com/ibm-ai-index",
+        "summary": "76% of enterprises have appointed CAIO, up from 26% in 2025.",
+        "head_excerpt": "Chapter 1: Executive Summary...",
+        "original_filename": "",
+    },
+    {
+        "title": "MSFT Q3 FY2026 Earnings",
+        "url": "",
+        "summary": "Cloud+AI revenue $37B, +123% YoY.",
+        "head_excerpt": "Highlights and forward-looking statements...",
+        "original_filename": "msft_q3.pdf",
+    },
+]
+
+
+class TestFormatReportsForPrompt:
+    def test_empty_returns_empty_string(self):
+        assert format_reports_for_prompt([]) == ""
+        assert format_reports_for_prompt(None) == ""
+
+    def test_includes_title_and_summary(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS)
+        assert "[보고서 1] IBM AI Index 2026" in out
+        assert "76% of enterprises" in out
+
+    def test_includes_excerpt(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS)
+        assert "Chapter 1: Executive Summary" in out
+
+    def test_url_source_for_url_report(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS[:1])
+        assert "https://example.com/ibm-ai-index" in out
+
+    def test_pdf_upload_source_label(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS[1:])
+        assert "PDF 업로드" in out
+        assert "msft_q3.pdf" in out
+
+    def test_excerpt_truncation(self):
+        long_excerpt = "X" * 10000
+        reports = [{"title": "t", "url": "", "summary": "s",
+                    "head_excerpt": long_excerpt}]
+        out = format_reports_for_prompt(reports, max_excerpt_chars=500)
+        # 500자 한도 — X 시퀀스가 정확히 500자만 포함
+        assert out.count("X") == 500
+
+
+class TestBuildWeeklyPromptWithReports:
+    def test_no_reports_preserves_legacy_output(self):
+        prompt_no = build_weekly_prompt("articles_text", "past")
+        prompt_none = build_weekly_prompt("articles_text", "past", reports=None)
+        # None과 인자 미지정은 동일
+        assert prompt_no == prompt_none
+        # 보고서 데이터 흔적이 없음
+        assert "[보고서 1]" not in prompt_no
+        assert "1차 자료(연구보고서/백서/회사 발표)입니다" not in prompt_no
+
+    def test_with_reports_inserts_reports_block(self):
+        prompt = build_weekly_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        assert "[보고서 1] IBM AI Index 2026" in prompt
+        assert "76% of enterprises" in prompt
+        assert "1차 자료(연구보고서/백서/회사 발표)입니다" in prompt
+
+    def test_citation_format_guidance_present(self):
+        prompt = build_weekly_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        # constraint #7 가이드 (literal {title}로 출력됨)
+        assert "* 보고서: {title}" in prompt
+
+    def test_articles_still_present(self):
+        prompt = build_weekly_prompt("ARTICLES_MARKER", "past", reports=SAMPLE_REPORTS)
+        assert "ARTICLES_MARKER" in prompt

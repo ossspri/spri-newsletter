@@ -299,10 +299,13 @@ def create_app(config: dict, db_conn) -> Flask:
             grouped.setdefault(date_key, []).append(a)
         # 수동 추가 기사
         manual_articles = get_all_manual_articles(db)
+        # 수동 추가 보고서 (PR3)
+        manual_reports = get_all_manual_reports(db)
         return render_template(
             "weekly.html",
             grouped_articles=grouped,
             manual_articles=manual_articles,
+            manual_reports=manual_reports,
             total_count=len(articles) + len(manual_articles),
         )
 
@@ -501,21 +504,53 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/weekly/generate", methods=["POST"])
     def weekly_generate():
-        """Claude API로 Weekly 보고서를 생성한다."""
+        """Claude API로 Weekly 보고서를 생성한다.
+
+        PR3: ``reports`` 배열을 받아 선택된 보고서를 DB에서 조회 →
+        Claude prompt에 ``<reports>`` 블록으로 주입.
+        """
         data = request.get_json() or {}
         articles = data.get("articles", [])
+        report_refs = data.get("reports", []) or []
 
-        if not articles:
+        if not articles and not report_refs:
             return jsonify({
                 "success": False,
-                "error": "선택된 기사가 없습니다.",
+                "error": "선택된 기사 또는 보고서가 없습니다.",
             }), 400
 
         try:
-            existing_summaries = get_existing_summaries(get_db())
+            db = get_db()
+            existing_summaries = get_existing_summaries(db)
+
+            # 선택된 보고서 풀스펙 조회 + head_excerpt 보충 (text_path에서 첫 4000자)
+            selected_reports: list[dict] = []
+            for ref in report_refs:
+                rid = ref.get("id") if isinstance(ref, dict) else None
+                if not rid:
+                    continue
+                # 'report-{id}' prefix 처리
+                if isinstance(rid, str) and rid.startswith("report-"):
+                    rid = rid[len("report-"):]
+                r = get_manual_report(db, rid)
+                if r is None:
+                    logger.warning("선택된 보고서를 찾을 수 없음 id=%s", rid)
+                    continue
+                # head_excerpt를 text_path에서 로드 (앞부분)
+                excerpt = ""
+                tp = r.get("text_path", "")
+                if tp:
+                    try:
+                        excerpt = Path(tp).read_text(encoding="utf-8")[:4000]
+                    except OSError as e:
+                        logger.warning("보고서 전문 로드 실패 %s: %s", tp, e)
+                selected_reports.append({**r, "head_excerpt": excerpt})
+
             claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
             claude = ClaudeService(get_cfg(), claude_api_key)
-            markdown = claude.generate_weekly(articles, existing_summaries)
+            markdown = claude.generate_weekly(
+                articles, existing_summaries, reports=selected_reports or None,
+            )
 
             date_display = get_kst_display_date()
             html_preview = render_email_html(markdown, "weekly", date_display)

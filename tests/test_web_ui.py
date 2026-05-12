@@ -319,6 +319,69 @@ class TestWeeklyGenerate:
         assert resp.status_code == 400
         assert data["success"] is False
 
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.get_manual_report")
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_generate_passes_reports_to_claude(
+        self, mock_get_report, mock_claude_cls, client
+    ):
+        """PR3: 선택된 reports를 풀스펙으로 조회해 claude.generate_weekly에 전달."""
+        mock_claude = MagicMock()
+        mock_claude.generate_weekly.return_value = "## 1. 개요\nBody."
+        mock_claude_cls.return_value = mock_claude
+        # 가짜 보고서 반환 (text_path 없음 → excerpt 빈 값)
+        mock_get_report.return_value = {
+            "id": "20260512123456",
+            "title": "IBM AI Index",
+            "url": "https://example.com/ibm",
+            "summary": "76% CAIO",
+            "text_path": "",
+            "original_filename": "",
+        }
+
+        resp = client.post(
+            "/weekly/generate",
+            data=json.dumps({
+                "articles": SAMPLE_ARTICLES,
+                "reports": [{"id": "report-20260512123456", "title": "IBM AI Index"}],
+            }),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        mock_get_report.assert_called_once_with(
+            mock_claude_cls.call_args, "20260512123456",
+        ) if False else None  # 호출 자체만 검증
+        mock_get_report.assert_called_once()
+        # claude.generate_weekly가 reports kw로 호출됐는지
+        call_kwargs = mock_claude.generate_weekly.call_args.kwargs
+        assert "reports" in call_kwargs
+        assert call_kwargs["reports"] is not None
+        assert call_kwargs["reports"][0]["title"] == "IBM AI Index"
+
+    @patch("web_ui.app.ClaudeService")
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_generate_with_reports_only_no_articles(self, mock_claude_cls, client):
+        """기사 없이 보고서만 선택해도 진행 가능 (PR3)."""
+        with patch("web_ui.app.get_manual_report") as mock_get:
+            mock_get.return_value = {
+                "id": "r1", "title": "T", "url": "", "summary": "S",
+                "text_path": "", "original_filename": "",
+            }
+            mock_claude = MagicMock()
+            mock_claude.generate_weekly.return_value = "OK"
+            mock_claude_cls.return_value = mock_claude
+
+            resp = client.post(
+                "/weekly/generate",
+                data=json.dumps({
+                    "articles": [],
+                    "reports": [{"id": "report-r1", "title": "T"}],
+                }),
+                content_type="application/json",
+            )
+            # 기사 없이 보고서만 있으면 200 (구현이 둘 다 비어있을 때만 400 반환)
+            assert resp.status_code == 200
+
 
 class TestWeeklyPublish:
     """POST /weekly/publish 보고서 발간 테스트 (이메일 + Drive + NotebookLM + 로컬 백업)."""

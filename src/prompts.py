@@ -74,13 +74,34 @@ ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가
     )
 
 
-def build_weekly_prompt(article_list: str, existing_summaries: str) -> str:
+def build_weekly_prompt(
+    article_list: str,
+    existing_summaries: str,
+    reports: list[dict] | None = None,
+) -> str:
     """Weekly 보고서 생성용 프롬프트를 조립한다.
 
     Args:
         article_list: 전문가가 선별한 기사 목록
         existing_summaries: 이전 뉴스레터에 포함된 기사 제목 목록 (중복 배제용)
+        reports: 수동 첨부 1차 자료(연구보고서/백서/회사 발표) dict list.
+            None 또는 빈 list면 ``<reports>`` 블록을 prompt에서 생략 — 기존
+            동작 보존. 있으면 별도 블록으로 주입하여 LLM이 "1차 자료"로
+            인식, 직접 인용을 우선하도록 가이드.
     """
+    if reports:
+        report_block = (
+            "\n<reports>\n"
+            "아래는 전문가가 직접 첨부한 1차 자료(연구보고서/백서/회사 발표)입니다. "
+            "이 자료들은 기사보다 신뢰도가 높은 원천이므로 본문에서 직접 인용하고 "
+            "출처를 보고서 제목으로 표시하는 것을 우선 고려하십시오. "
+            "수치·인용·발표 시점을 가능한 보존하십시오.\n\n"
+            + format_reports_for_prompt(reports)
+            + "\n</reports>\n"
+        )
+    else:
+        report_block = ""
+
     return """<role>
 당신은 소프트웨어정책연구소(SPRi)의 주간 산업분석 에이전트입니다.
 </role>
@@ -91,6 +112,7 @@ def build_weekly_prompt(article_list: str, existing_summaries: str) -> str:
 <provided_articles>
 {article_list}
 </provided_articles>
+{report_block}
 
 <sub_task> 리포트 작성
 1. 구성: 다음 6개 섹션 헤더를 모두 출력하되, 관련 기사가 있는 섹션만 본문을 작성할 것.
@@ -127,12 +149,13 @@ ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가
 </main_task>
 
 <constraints>
-1. 제공된 기사 목록에서만 선별하여 사용할 것.
+1. 제공된 기사 목록 + (있다면) <reports> 1차 자료에서만 선별하여 사용할 것.
 2. 아래 <existing_summaries>에 이미 존재하는 동향과 중복되는 내용은 제외할 것.
 3. 일반적인 AI 기술 소개, LLM 벤치마크 단순 비교, SW 산업과 무관한 AI 활용 사례는 제외할 것.
 4. 절대로 리포트 본문 외에 부가적 안내 문구를 포함하지 말고 리포트 내용만 출력할 것.
 5. 기사는 최대 25개까지만 포함할 것.
 6. 출처 URL을 문서 끝에 모아놓는 미주 방식은 절대 사용하지 말 것. 반드시 해당 동향 본문 바로 아래에 각주로 배치할 것.
+7. <reports>에 첨부된 1차 자료가 있으면 동향 본문에 가능한 직접 인용하고, 출처는 '* 보고서: {{title}}' 형태로 본문 아래에 표시할 것.
 </constraints>
 
 <existing_summaries>
@@ -140,6 +163,7 @@ ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가
 </existing_summaries>""".format(
         article_list=article_list,
         existing_summaries=existing_summaries or "(없음)",
+        report_block=report_block,
     )
 
 
@@ -240,3 +264,44 @@ def format_articles_for_prompt(articles: list[dict]) -> str:
             f"   출처: {a.get('source_name', 'N/A')} | 발행: {a.get('published_at', 'N/A')}"
         )
     return "\n\n".join(lines)
+
+
+def format_reports_for_prompt(reports: list[dict], max_excerpt_chars: int = 4000) -> str:
+    """수동 첨부 1차 자료(보고서)를 프롬프트에 삽입할 텍스트로 포맷팅.
+
+    Args:
+        reports: ``get_manual_report`` 또는 ``get_all_manual_reports``의 dict
+            list. 기대 키: ``title``, ``url``, ``original_filename``,
+            ``summary``, 추가로 ``head_excerpt``가 있으면 함께 포함.
+        max_excerpt_chars: 보고서 1건당 발췌 길이 상한 (토큰 통제).
+
+    Returns:
+        ``[보고서 N] 제목 / 출처 / 요약 / 핵심 발췌`` 블록을 ``---``로
+        구분한 단일 문자열.
+    """
+    if not reports:
+        return ""
+
+    blocks = []
+    for i, r in enumerate(reports, 1):
+        title = r.get("title", "(제목 없음)")
+        url = r.get("url", "")
+        original = r.get("original_filename", "")
+        summary = (r.get("summary") or "").strip()
+        excerpt = (r.get("head_excerpt") or "").strip()[:max_excerpt_chars]
+
+        if url:
+            source_line = f"출처: {url}"
+        elif original:
+            source_line = f"출처: PDF 업로드 (원본 파일: {original})"
+        else:
+            source_line = "출처: 수동 첨부"
+
+        block = f"[보고서 {i}] {title}\n{source_line}"
+        if summary:
+            block += f"\n요약: {summary}"
+        if excerpt:
+            block += f"\n\n핵심 발췌:\n{excerpt}"
+        blocks.append(block)
+
+    return "\n\n---\n\n".join(blocks)

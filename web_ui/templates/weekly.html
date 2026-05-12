@@ -79,6 +79,42 @@
       <button class="btn btn-secondary" onclick="addManualArticle()">추가</button>
     </div>
   </div>
+
+  <!-- 수동 추가 보고서 (PR3) -->
+  {% if manual_reports %}
+  <div class="date-group" id="manual-reports-group">
+    <h4 class="date-label">수동 추가 보고서</h4>
+    {% for r in manual_reports %}
+    <div class="article-item selectable">
+      <label class="checkbox-label">
+        <input type="checkbox" class="report-check"
+               data-id="report-{{ r.id }}"
+               data-title="{{ r.title }}"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title">📄 {{ r.title }}
+            {% if r.url %}<a href="{{ r.url }}" target="_blank">(원문)</a>{% endif %}
+          </div>
+          <div class="article-desc">{{ (r.summary or '')[:200] }}{% if (r.summary or '')|length > 200 %}…{% endif %}</div>
+        </div>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 수동 보고서 추가 폼 -->
+  <div class="add-article-form">
+    <h4>수동 보고서 추가</h4>
+    <div class="input-group">
+      <input type="url" id="manual-report-url" placeholder="보고서 URL (HTML 또는 PDF 직링크)" class="input">
+      <button class="btn btn-secondary" onclick="addManualReportFromUrl()">URL 추가</button>
+    </div>
+    <div class="input-group">
+      <input type="file" id="manual-report-file" accept="application/pdf">
+      <button class="btn btn-secondary" onclick="addManualReportFromFile()">PDF 업로드</button>
+    </div>
+  </div>
 </section>
 
 <!-- Step 2: 보고서 생성 -->
@@ -123,11 +159,25 @@
     }));
   }
 
+  function getSelectedReports() {
+    const checks = document.querySelectorAll('.report-check:checked');
+    return Array.from(checks).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.title,
+    }));
+  }
+
   function updateCounter() {
-    const count = document.querySelectorAll('.article-check:checked').length;
-    document.getElementById('selection-counter').textContent = `${count}/25 선택`;
+    const articleCount = document.querySelectorAll('.article-check:checked').length;
+    const reportCount = document.querySelectorAll('.report-check:checked').length;
+    const counter = document.getElementById('selection-counter');
+    if (reportCount > 0) {
+      counter.textContent = `${articleCount}/25 기사 + ${reportCount} 보고서`;
+    } else {
+      counter.textContent = `${articleCount}/25 선택`;
+    }
     const warning = document.getElementById('warning-25');
-    if (count > 25) {
+    if (articleCount > 25) {
       warning.classList.remove('hidden');
     } else {
       warning.classList.add('hidden');
@@ -246,10 +296,104 @@
     }
   }
 
+  // ── 수동 보고서 추가 (PR3) ──
+
+  function _escapeHtml(s) {
+    return (s || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _appendReportRow(report) {
+    // manual-reports-group이 없으면 생성 (수동 보고서 추가 폼 바로 앞)
+    let group = document.getElementById('manual-reports-group');
+    if (!group) {
+      group = document.createElement('div');
+      group.id = 'manual-reports-group';
+      group.className = 'date-group';
+      group.innerHTML = '<h4 class="date-label">수동 추가 보고서</h4>';
+      // 수동 보고서 추가 폼(두 번째 add-article-form) 바로 앞에 삽입
+      const forms = document.querySelectorAll('.add-article-form');
+      const reportForm = forms[forms.length - 1];  // 마지막 = 보고서 폼
+      reportForm.parentNode.insertBefore(group, reportForm);
+    }
+    const title = _escapeHtml(report.title);
+    const url = _escapeHtml(report.url || '');
+    const summary = _escapeHtml((report.summary_preview || '').slice(0, 200));
+    const item = document.createElement('div');
+    item.className = 'article-item selectable';
+    const urlLink = url ? ` <a href="${url}" target="_blank">(원문)</a>` : '';
+    item.innerHTML = `
+      <label class="checkbox-label">
+        <input type="checkbox" class="report-check"
+               data-id="report-${_escapeHtml(report.id)}"
+               data-title="${title}"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title">📄 ${title}${urlLink}</div>
+          <div class="article-desc">${summary}</div>
+        </div>
+      </label>
+    `;
+    group.appendChild(item);
+  }
+
+  async function _submitReport(formData, loadingMsg) {
+    showLoading(loadingMsg);
+    try {
+      const resp = await fetch('/weekly/add-report', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || '보고서 추가 실패');
+      }
+      _appendReportRow(data.report);
+      updateCounter();
+      if (data.report.warning) {
+        showToast('추가됨 (경고): ' + data.report.warning, true);
+      } else {
+        showToast('보고서가 추가되었습니다.');
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function addManualReportFromUrl() {
+    const urlInput = document.getElementById('manual-report-url');
+    const url = urlInput.value.trim();
+    if (!url) {
+      showToast('URL을 입력하세요.', true);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('url', url);
+    await _submitReport(fd, '보고서 메타데이터 추출 중... (PDF면 다운로드+요약, 최대 1분)');
+    urlInput.value = '';
+  }
+
+  async function addManualReportFromFile() {
+    const fileInput = document.getElementById('manual-report-file');
+    const file = fileInput.files[0];
+    if (!file) {
+      showToast('PDF 파일을 선택하세요.', true);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    await _submitReport(fd, 'PDF 업로드 + 텍스트 추출 + Claude 요약 중... (최대 1분)');
+    fileInput.value = '';
+  }
+
   async function generateWeekly() {
     const articles = getSelectedArticles();
-    if (articles.length === 0) {
-      showToast('기사를 선택하세요.', true);
+    const reports = getSelectedReports();
+    if (articles.length === 0 && reports.length === 0) {
+      showToast('기사 또는 보고서를 하나 이상 선택하세요.', true);
       return;
     }
     showLoading('Claude API로 주간 보고서를 생성 중입니다... (최대 1분 소요)');
@@ -260,6 +404,7 @@
         body: JSON.stringify({
           article_ids: articles.map(a => a.id),
           articles: articles,
+          reports: reports,
         }),
       });
       weeklyMarkdown = data.markdown;

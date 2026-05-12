@@ -45,12 +45,30 @@ class ClaudeService:
         logger.info("Daily 뉴스레터 생성 완료 (%d자)", len(result))
         return result
 
-    def generate_weekly(self, articles: list[dict], existing_summaries: str = "") -> str:
-        """Weekly 보고서 마크다운을 생성한다."""
-        article_text = format_articles_for_prompt(articles)
-        prompt = build_weekly_prompt(article_text, existing_summaries)
+    def generate_weekly(
+        self,
+        articles: list[dict],
+        existing_summaries: str = "",
+        reports: list[dict] | None = None,
+    ) -> str:
+        """Weekly 보고서 마크다운을 생성한다.
 
-        logger.info("Weekly 보고서 생성 시작 (기사 %d건, 모델: %s)", len(articles), self.model)
+        Args:
+            articles: 선별된 기사 list.
+            existing_summaries: 과거 발송 기사 제목 (중복 배제).
+            reports: 수동 첨부 1차 자료 (PR3). None/빈 list면 기존 동작.
+                안전 한도: 상위 5건까지만 prompt에 주입 (체크박스로 더
+                선택해도 토큰 폭증 방지).
+        """
+        article_text = format_articles_for_prompt(articles)
+        trimmed_reports = (reports or [])[:5]
+        prompt = build_weekly_prompt(article_text, existing_summaries,
+                                     reports=trimmed_reports or None)
+
+        logger.info(
+            "Weekly 보고서 생성 시작 (기사 %d건, 보고서 %d건, 모델: %s)",
+            len(articles), len(trimmed_reports), self.model,
+        )
         raw = self._call_api(prompt)
         result = self._postprocess(raw)
         logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
