@@ -3,8 +3,8 @@
 Weekly 화면에서 사용자가 URL 또는 PDF 파일로 1차 자료(연구보고서/백서/회사
 발표)를 첨부할 때 사용하는 안전 검증 + 파일 처리 유틸 모음.
 
-PR1 범위: URL 안전성 검증, 파일명 sanitize, URL kind 판별 (HTML vs PDF).
-PR2 범위 (별도 commit): download_pdf, extract_pdf_text, save_report_text.
+PR1: URL 안전성 검증, 파일명 sanitize, URL kind 판별 (HTML vs PDF).
+PR2: download_pdf, extract_pdf_text, save_report_text.
 
 호출자: web_ui/app.py의 /weekly/add-report 라우트.
 """
@@ -18,6 +18,9 @@ from urllib.parse import urlparse
 
 import requests
 from werkzeug.utils import secure_filename
+
+PDF_MAGIC = b"%PDF-"
+DEFAULT_MAX_PDF_BYTES = 50 * 1024 * 1024  # 50MB
 
 logger = logging.getLogger(__name__)
 
@@ -161,3 +164,132 @@ def detect_url_kind(url: str, timeout: float = 10.0) -> str:
             return "pdf"
 
     return "html"
+
+
+# ── PR2: PDF 다운로드 + 텍스트 추출 + 저장 ──
+
+
+def download_pdf(
+    url: str,
+    out_path: Path,
+    max_bytes: int = DEFAULT_MAX_PDF_BYTES,
+    timeout: float = 30.0,
+) -> Path:
+    """PDF URL을 스트리밍으로 다운로드하여 ``out_path``에 저장한다.
+
+    안전 정책:
+      - 첫 청크의 magic byte ``%PDF-`` 검증
+      - 누적 바이트 ``max_bytes`` 초과 시 중단 + 부분 파일 삭제
+      - 호출 전 ``is_safe_url(url)`` 통과 가정
+
+    Args:
+        url: PDF 직링크.
+        out_path: 저장 경로. 부모 디렉토리 자동 생성.
+        max_bytes: 허용 최대 크기. 초과 시 ``ValueError``.
+        timeout: HTTP 타임아웃.
+
+    Returns:
+        ``out_path`` (저장 성공 시).
+
+    Raises:
+        ValueError: magic byte 불일치 또는 크기 초과.
+        requests.RequestException: 네트워크/HTTP 에러.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    resp = requests.get(
+        url,
+        timeout=timeout,
+        stream=True,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; SPRi-Newsletter/1.0)"},
+    )
+    resp.raise_for_status()
+
+    chunk_size = 64 * 1024
+    total = 0
+    first_chunk = True
+
+    try:
+        with out_path.open("wb") as f:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if not chunk:
+                    continue
+                if first_chunk:
+                    if not chunk.startswith(PDF_MAGIC):
+                        raise ValueError(
+                            "다운로드한 파일이 PDF가 아님 (magic byte 불일치)"
+                        )
+                    first_chunk = False
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError(
+                        f"PDF 크기 한도 초과: {total} > {max_bytes} bytes"
+                    )
+                f.write(chunk)
+    except Exception:
+        # 부분 파일 정리
+        out_path.unlink(missing_ok=True)
+        raise
+
+    logger.info("PDF 다운로드 완료: %s (%d bytes)", out_path.name, total)
+    return out_path
+
+
+def extract_pdf_text(
+    path: Path,
+    head_pages: int = 3,
+) -> tuple[str, str]:
+    """pdfplumber로 PDF에서 전문 + 첫 N페이지 발췌를 추출한다.
+
+    Args:
+        path: 로컬 PDF 파일 경로.
+        head_pages: 발췌에 포함할 첫 페이지 수 (기본 3).
+
+    Returns:
+        ``(full_text, head_excerpt)`` 튜플.
+          - ``full_text``: 전 페이지 텍스트, 페이지 사이는 ``\\n\\n`` 구분.
+          - ``head_excerpt``: 첫 ``head_pages``개 페이지만.
+
+    Raises:
+        FileNotFoundError, RuntimeError (pdfplumber 내부 에러).
+
+    Note: 이미지 스캔 PDF는 텍스트 레이어가 없어 빈 문자열 반환 가능.
+    OCR fallback은 범위 밖.
+    """
+    import pdfplumber  # 지연 import — PR1에서 호출되지 않음
+
+    pages_text: list[str] = []
+    head_pages_text: list[str] = []
+
+    with pdfplumber.open(str(path)) as pdf:
+        for i, page in enumerate(pdf.pages):
+            try:
+                text = page.extract_text() or ""
+            except Exception as e:
+                logger.warning("PDF page %d 추출 실패: %s", i + 1, e)
+                text = ""
+            pages_text.append(text)
+            if i < head_pages:
+                head_pages_text.append(text)
+
+    full_text = "\n\n".join(pages_text).strip()
+    head_excerpt = "\n\n".join(head_pages_text).strip()
+    logger.info(
+        "PDF 텍스트 추출: %s (%d pages, %d chars total)",
+        path.name, len(pages_text), len(full_text),
+    )
+    return full_text, head_excerpt
+
+
+def save_report_text(report_id: str, full_text: str) -> Path:
+    """추출한 보고서 전문을 ``data/manual_reports/{id}.txt``에 저장.
+
+    이유: CSV row에 수만자 본문을 넣지 않기 위해 별도 파일로 보관.
+    프롬프트는 ``summary`` + ``head_excerpt``만 사용; ``full_text``는
+    추후 디버깅/재처리용 보관.
+    """
+    out_path = MANUAL_REPORTS_DIR / f"{report_id}.txt"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(full_text, encoding="utf-8")
+    logger.info("보고서 전문 저장: %s (%d chars)", out_path, len(full_text))
+    return out_path

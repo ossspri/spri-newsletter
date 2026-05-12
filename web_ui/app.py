@@ -19,11 +19,23 @@ from src.db import (
     log_newsletter,
     archive_articles,
     insert_manual_article,
+    insert_manual_report,
     get_daily_articles_today,
     get_all_manual_articles,
+    get_all_manual_reports,
+    get_manual_report,
     clear_today_archive,
     clear_today_daily_articles,
     clear_all_manual_articles,
+)
+from src.manual_reports import (
+    MANUAL_REPORTS_DIR,
+    detect_url_kind,
+    download_pdf,
+    extract_pdf_text,
+    is_safe_url,
+    sanitize_filename,
+    save_report_text,
 )
 from src.news_service import GNewsService
 from src.claude_service import ClaudeService
@@ -93,6 +105,8 @@ def create_app(config: dict, db_conn) -> Flask:
     )
     app.config["config"] = config
     app.config["db_conn"] = db_conn
+    # PR2: 수동 보고서 PDF 업로드 — 50MB 제한 (초과 시 413).
+    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
     def get_db():
         return app.config["db_conn"]
@@ -329,6 +343,161 @@ def create_app(config: dict, db_conn) -> Flask:
             "success": True,
             "article": {"title": title, "url": url, "description": description},
         })
+
+    @app.route("/weekly/add-report", methods=["POST"])
+    def weekly_add_report():
+        """수동 보고서를 추가한다.
+
+        두 가지 입력 형태:
+          - multipart/form-data + ``file`` 필드 → PDF 업로드
+          - multipart/form-data + ``url`` 필드 → URL (HTML 또는 PDF 직링크)
+
+        흐름:
+          1. URL이면 ``is_safe_url`` SSRF 검증 → ``detect_url_kind``로 분기
+          2. HTML: ``extract_url_metadata`` 재사용해 title/description
+             확보 → summary는 description으로 폴백
+          3. PDF: ``download_pdf`` (또는 업로드 파일을 그대로 저장) →
+             ``extract_pdf_text`` → ``ClaudeService.summarize_report_text``
+          4. 본문 전문을 ``data/manual_reports/{id}.txt``로 저장
+          5. ``insert_manual_report``로 메타 row 기록
+
+        실패 정책: Claude 요약 실패해도 head_excerpt만 가지고 진행 (보고서
+        추가 자체는 성공). PDF 추출이 빈 문자열(이미지 스캔)이면 경고 메시지
+        포함해 응답.
+        """
+        from src.db import _gen_id
+        from io import BytesIO
+
+        url = (request.form.get("url") or "").strip()
+        upload = request.files.get("file")
+
+        if not url and not upload:
+            return jsonify({"success": False, "error": "url 또는 file 중 하나는 필수입니다."}), 400
+
+        report_id = _gen_id()
+        title = ""
+        summary = ""
+        full_text = ""
+        head_excerpt = ""
+        source_type = ""
+        original_filename = ""
+        file_path_str = ""
+        text_path_str = ""
+        warning = None
+
+        try:
+            if upload:
+                # ── PDF 파일 업로드 분기 ──
+                source_type = "pdf"
+                raw_name = upload.filename or "unnamed.pdf"
+                original_filename = sanitize_filename(raw_name)
+                if not original_filename.lower().endswith(".pdf"):
+                    return jsonify({"success": False, "error": "PDF 파일만 업로드 가능합니다."}), 400
+
+                # Magic byte 검증을 위해 첫 청크만 미리 읽기
+                first = upload.stream.read(8)
+                if not first.startswith(b"%PDF-"):
+                    return jsonify({"success": False, "error": "유효한 PDF 파일이 아닙니다."}), 400
+
+                pdf_path = MANUAL_REPORTS_DIR / f"{report_id}.pdf"
+                pdf_path.parent.mkdir(parents=True, exist_ok=True)
+                with pdf_path.open("wb") as f:
+                    f.write(first)
+                    while True:
+                        chunk = upload.stream.read(64 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                file_path_str = str(pdf_path)
+
+                full_text, head_excerpt = extract_pdf_text(pdf_path)
+                if not full_text:
+                    warning = "PDF에서 텍스트를 추출하지 못했습니다 (이미지 스캔본일 수 있음)."
+                title = original_filename.removesuffix(".pdf")
+
+            else:
+                # ── URL 입력 분기 ──
+                if not is_safe_url(url):
+                    return jsonify({"success": False, "error": "안전하지 않은 URL입니다."}), 400
+
+                kind = detect_url_kind(url)
+                if kind == "pdf":
+                    source_type = "pdf"
+                    pdf_path = MANUAL_REPORTS_DIR / f"{report_id}.pdf"
+                    try:
+                        download_pdf(url, pdf_path)
+                    except ValueError as ve:
+                        return jsonify({"success": False, "error": str(ve)}), 400
+                    file_path_str = str(pdf_path)
+                    # URL의 마지막 path segment를 원본 파일명으로
+                    from urllib.parse import urlparse as _up
+                    original_filename = sanitize_filename(Path(_up(url).path).name or "downloaded.pdf")
+                    full_text, head_excerpt = extract_pdf_text(pdf_path)
+                    if not full_text:
+                        warning = "PDF에서 텍스트를 추출하지 못했습니다."
+                    title = original_filename.removesuffix(".pdf")
+                else:
+                    # HTML 페이지
+                    source_type = "url"
+                    meta = extract_url_metadata(url)
+                    title = meta["title"] or url
+                    full_text = meta.get("description", "") or ""
+                    head_excerpt = full_text
+                    summary = full_text  # 짧은 메타는 그대로 요약으로 사용
+
+            # ── Claude 요약 (PDF 본문이 충분히 길 때만) ──
+            if full_text and source_type == "pdf":
+                claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+                if claude_api_key:
+                    try:
+                        claude = ClaudeService(get_cfg(), claude_api_key)
+                        summary = claude.summarize_report_text(full_text)
+                    except Exception as e:
+                        logger.warning("보고서 요약 실패, head_excerpt만 사용: %s", e)
+                        summary = head_excerpt[:1500]
+                else:
+                    summary = head_excerpt[:1500]
+
+            # ── 전문 저장 ──
+            if full_text:
+                text_path = save_report_text(report_id, full_text)
+                text_path_str = str(text_path)
+
+            # ── DB 메타 기록 ──
+            insert_manual_report(
+                get_db(),
+                report_id=report_id,
+                title=title,
+                source_type=source_type,
+                url=url if source_type == "url" or (source_type == "pdf" and url) else "",
+                original_filename=original_filename,
+                file_path=file_path_str,
+                text_path=text_path_str,
+                summary=summary,
+            )
+
+            return jsonify({
+                "success": True,
+                "report": {
+                    "id": report_id,
+                    "title": title,
+                    "source_type": source_type,
+                    "url": url,
+                    "summary_preview": summary[:300],
+                    "warning": warning,
+                },
+            })
+
+        except Exception as e:
+            logger.exception("수동 보고서 추가 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.errorhandler(413)
+    def too_large(_e):
+        return jsonify({
+            "success": False,
+            "error": "파일이 너무 큽니다 (50MB 한도).",
+        }), 413
 
     @app.route("/weekly/generate", methods=["POST"])
     def weekly_generate():

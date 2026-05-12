@@ -56,6 +56,61 @@ class ClaudeService:
         logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
         return result
 
+    def summarize_report_text(
+        self,
+        full_text: str,
+        max_chars: int = 1500,
+    ) -> str:
+        """수동 첨부 보고서의 전문을 1차 요약한다 (Weekly prompt 주입용).
+
+        용도: PR2 — Weekly '수동 보고서 추가' 흐름에서 사용자가 첨부한 PDF/HTML
+        보고서의 전문(수만자)을 그대로 Weekly 생성 프롬프트에 넣으면 토큰
+        폭발이 일어남. 본 메서드로 1000~1500자 정도의 한국어 요약을 만들어
+        prompt에 ``<reports>`` 블록 안에 주입한다.
+
+        Args:
+            full_text: pdfplumber/HTML 본문에서 추출한 전문.
+            max_chars: 결과 요약의 대략 목표 길이 (모델에 가이드만 줌).
+
+        Returns:
+            한국어 요약 문자열. 실패 시 빈 문자열 (호출자가 fallback 처리).
+            전문이 너무 짧으면 그대로 또는 살짝 정리한 형태로 반환.
+        """
+        if not full_text or not full_text.strip():
+            return ""
+
+        # 본문이 충분히 짧으면 요약 불필요
+        if len(full_text) <= max_chars:
+            return full_text.strip()
+
+        prompt = (
+            "다음은 1차 자료(연구보고서/백서/회사 발표)의 전문입니다. "
+            "SPRi 주간 SW 산업 동향 보고서에 인용할 수 있도록 한국어로 "
+            f"약 {max_chars}자 이내로 요약해주세요.\n\n"
+            "요약 작성 지침:\n"
+            "1. 핵심 수치·인용·구체적 사실을 우선 포함 (예: '76% of enterprises...').\n"
+            "2. 보고서 발행 주체와 발표 시점을 명시.\n"
+            "3. SW 산업·정책·기업 동향과 연관 있는 부분 우선.\n"
+            "4. 일반론은 생략, 통계와 사례 위주.\n"
+            "5. 요약 본문만 출력하고 부가 설명은 금지.\n\n"
+            "<report_text>\n"
+            f"{full_text}\n"
+            "</report_text>"
+        )
+
+        try:
+            raw = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            ).content[0].text
+            summary = (raw or "").strip()
+            logger.info("보고서 요약 완료 (%d자 → %d자)", len(full_text), len(summary))
+            return summary
+        except Exception as e:
+            logger.warning("보고서 요약 실패, 빈 문자열 반환: %s", e)
+            return ""
+
     def translate_articles(self, articles: list[dict]) -> list[dict]:
         """기사 제목과 설명을 한국어로 번역한다."""
         if not articles:

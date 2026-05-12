@@ -1,5 +1,7 @@
 """tests/test_web_ui.py — 웹 UI Flask 앱 테스트 (Phase 6)"""
+import io
 import json
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -396,3 +398,147 @@ class TestPreviewEndpoint:
         assert resp.status_code == 200
         assert data["success"] is True
         assert "<h2" in data["html"]
+
+
+# ── 수동 보고서 추가 (PR2) ──
+
+
+class TestWeeklyAddReport:
+    """POST /weekly/add-report — URL 또는 PDF 첨부."""
+
+    def test_missing_both_inputs_returns_400(self, client):
+        resp = client.post(
+            "/weekly/add-report",
+            data={},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert data["success"] is False
+
+    @patch("web_ui.app.is_safe_url", return_value=False)
+    def test_unsafe_url_returns_400(self, mock_safe, client):
+        resp = client.post(
+            "/weekly/add-report",
+            data={"url": "http://127.0.0.1/admin"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "안전하지 않은" in data["error"] or "URL" in data["error"]
+
+    @patch("web_ui.app.is_safe_url", return_value=True)
+    @patch("web_ui.app.detect_url_kind", return_value="html")
+    @patch("web_ui.app.extract_url_metadata")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/x.txt"))
+    def test_html_url_extracts_metadata_and_inserts(
+        self, mock_save, mock_insert, mock_meta, mock_kind, mock_safe, client
+    ):
+        mock_meta.return_value = {
+            "title": "IBM AI Index 2026 Overview",
+            "description": "76% of enterprises have appointed CAIO...",
+        }
+
+        resp = client.post(
+            "/weekly/add-report",
+            data={"url": "https://example.com/ibm-ai-index"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["title"] == "IBM AI Index 2026 Overview"
+        assert data["report"]["source_type"] == "url"
+        # insert_manual_report 호출 검증
+        mock_insert.assert_called_once()
+        kwargs = mock_insert.call_args.kwargs
+        assert kwargs["source_type"] == "url"
+        assert kwargs["url"] == "https://example.com/ibm-ai-index"
+
+    @patch("web_ui.app.is_safe_url", return_value=True)
+    @patch("web_ui.app.detect_url_kind", return_value="pdf")
+    @patch("web_ui.app.download_pdf")
+    @patch("web_ui.app.extract_pdf_text", return_value=("full text body", "first 3 pages"))
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/x.txt"))
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_pdf_url_downloads_extracts_summarizes(
+        self, mock_save, mock_insert, mock_claude_cls, mock_extract,
+        mock_download, mock_kind, mock_safe, client
+    ):
+        mock_claude = MagicMock()
+        mock_claude.summarize_report_text.return_value = "76% CAIO 신설..."
+        mock_claude_cls.return_value = mock_claude
+
+        resp = client.post(
+            "/weekly/add-report",
+            data={"url": "https://example.com/report.pdf"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["source_type"] == "pdf"
+        mock_download.assert_called_once()
+        mock_extract.assert_called_once()
+        mock_claude.summarize_report_text.assert_called_once_with("full text body")
+
+    @patch("web_ui.app.extract_pdf_text", return_value=("full text", "head excerpt"))
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/y.txt"))
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_pdf_file_upload(
+        self, mock_save, mock_insert, mock_claude_cls, mock_extract, client, tmp_path
+    ):
+        mock_claude = MagicMock()
+        mock_claude.summarize_report_text.return_value = "요약"
+        mock_claude_cls.return_value = mock_claude
+
+        # 유효한 PDF magic byte로 시작하는 더미 데이터
+        pdf_bytes = b"%PDF-1.4\n" + b"x" * 1024
+        with patch("web_ui.app.MANUAL_REPORTS_DIR", tmp_path):
+            resp = client.post(
+                "/weekly/add-report",
+                data={
+                    "file": (io.BytesIO(pdf_bytes), "ibm_ai_index_2026.pdf"),
+                },
+                content_type="multipart/form-data",
+            )
+            data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["source_type"] == "pdf"
+        # 업로드된 파일이 tmp_path에 저장됐는지 확인
+        saved = list(tmp_path.glob("*.pdf"))
+        assert len(saved) == 1
+        assert saved[0].read_bytes().startswith(b"%PDF-")
+
+    def test_non_pdf_upload_rejected(self, client):
+        resp = client.post(
+            "/weekly/add-report",
+            data={
+                "file": (io.BytesIO(b"not a pdf"), "fake.pdf"),
+            },
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "PDF" in data["error"]
+
+    def test_wrong_extension_rejected(self, client):
+        resp = client.post(
+            "/weekly/add-report",
+            data={
+                "file": (io.BytesIO(b"%PDF-anything"), "evil.exe"),
+            },
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "PDF" in data["error"]
