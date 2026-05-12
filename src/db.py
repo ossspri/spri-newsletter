@@ -42,6 +42,15 @@ SHEET_HEADERS: dict[str, list[str]] = {
         "id", "sent_at", "type", "article_count", "recipient_count",
         "status", "error_message", "drive_doc_id", "nlm_notebook",
     ],
+    "manual_reports": [
+        # PR (Weekly 수동 보고서 추가): URL/PDF 1차 자료 첨부.
+        # source_type='url' 이면 (url 컬럼 사용, file_path 빈값),
+        # source_type='pdf' 이면 (file_path 사용, url은 다운로드 원본 URL 또는 빈값).
+        # text_path: pdfplumber로 추출한 전문(.txt) 경로. summary: Claude 1차 요약.
+        "id", "added_at", "title", "source_type",
+        "url", "original_filename", "file_path", "text_path",
+        "summary", "added_by",
+    ],
 }
 
 
@@ -452,4 +461,82 @@ def clear_all_manual_articles(db: FileDB) -> int:
     if count:
         table.overwrite([])
     logger.info("manual_articles 전체 삭제: %d건", count)
+    return count
+
+
+# ── manual_reports (Weekly 수동 보고서 추가) ──
+
+
+def insert_manual_report(
+    db: FileDB,
+    *,
+    title: str,
+    source_type: str,
+    url: str = "",
+    original_filename: str = "",
+    file_path: str = "",
+    text_path: str = "",
+    summary: str = "",
+    added_by: str = "user",
+    report_id: str | None = None,
+) -> str:
+    """manual_reports에 1차 자료(URL 또는 PDF) 레코드를 추가한다.
+
+    Args:
+        title: 보고서 제목 (HTML/PDF 메타 또는 파일명에서 추출).
+        source_type: 'url' (HTML 페이지) 또는 'pdf' (PDF 파일).
+        url: 원본 URL. PDF 업로드면 빈 문자열 가능.
+        original_filename: 사용자가 업로드한 원본 파일명.
+        file_path: data/manual_reports/{id}.pdf 등 로컬 경로.
+        text_path: pdfplumber로 추출한 전문 .txt 경로.
+        summary: Claude 1차 요약 (1000~1500자). 실패 시 빈 문자열.
+        added_by: 추가 주체 ('user' 기본).
+        report_id: 명시 ID. 미지정 시 ``_gen_id()`` 자동 생성.
+
+    Returns:
+        생성된 보고서 id.
+    """
+    if source_type not in ("url", "pdf"):
+        raise ValueError(f"source_type must be 'url' or 'pdf', got: {source_type!r}")
+
+    rid = report_id or _gen_id()
+    db.table("manual_reports").append({
+        "id": rid,
+        "added_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "title": title,
+        "source_type": source_type,
+        "url": url,
+        "original_filename": original_filename,
+        "file_path": file_path,
+        "text_path": text_path,
+        "summary": summary,
+        "added_by": added_by,
+    })
+    logger.info("수동 보고서 추가: id=%s, type=%s, title=%s", rid, source_type, title[:50])
+    return rid
+
+
+def get_all_manual_reports(db: FileDB) -> list[dict]:
+    """모든 수동 보고서를 최신순으로 반환."""
+    rows = db.table("manual_reports").rows()
+    rows.sort(key=lambda r: str(r.get("added_at", "")), reverse=True)
+    return rows
+
+
+def get_manual_report(db: FileDB, report_id: str) -> dict | None:
+    """특정 id의 수동 보고서를 반환. 없으면 None."""
+    for r in db.table("manual_reports").rows():
+        # _coerce_int가 적용되어 id가 int로 올 수 있으므로 문자열 비교
+        if str(r.get("id", "")) == str(report_id):
+            return r
+    return None
+
+
+def clear_all_manual_reports(db: FileDB) -> int:
+    """manual_reports 전체 삭제 (CSV row만; 파일은 보존)."""
+    table = db.table("manual_reports")
+    count = len(table.rows())
+    if count:
+        table.overwrite([])
+    logger.info("manual_reports 전체 삭제: %d건", count)
     return count

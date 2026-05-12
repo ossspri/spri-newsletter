@@ -2,17 +2,23 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.db import (
     SHEET_HEADERS,
     archive_articles,
     check_today_sent,
+    clear_all_manual_reports,
     get_all_manual_articles,
+    get_all_manual_reports,
     get_articles_for_date_range,
     get_daily_articles_today,
     get_existing_summaries,
+    get_manual_report,
     get_weekly_articles,
     insert_daily_articles,
     insert_manual_article,
+    insert_manual_report,
     log_newsletter,
 )
 
@@ -332,3 +338,104 @@ class TestGetAllManualArticles:
         results = get_all_manual_articles(db)
         assert len(results) == 2
         assert results[0]["title"] == "Newer"  # 최신순
+
+
+# ── manual_reports (PR1: Weekly 수동 보고서) ──
+
+
+class TestManualReports:
+    def test_schema_present(self, db):
+        assert "manual_reports" in SHEET_HEADERS
+        assert db.table("manual_reports").path.exists()
+        # 필수 컬럼 확인
+        for col in ("id", "title", "source_type", "url", "file_path",
+                    "text_path", "summary"):
+            assert col in SHEET_HEADERS["manual_reports"]
+
+    def test_insert_url_report(self, db):
+        rid = insert_manual_report(
+            db,
+            title="IBM AI Index 2026",
+            source_type="url",
+            url="https://example.com/ibm-ai-index.html",
+            summary="76% of enterprises have appointed CAIO...",
+        )
+        assert isinstance(rid, str) and len(rid) > 0
+
+        rows = db.table("manual_reports").rows()
+        assert len(rows) == 1
+        assert rows[0]["title"] == "IBM AI Index 2026"
+        assert rows[0]["source_type"] == "url"
+        assert rows[0]["url"] == "https://example.com/ibm-ai-index.html"
+        assert rows[0]["file_path"] == ""
+
+    def test_insert_pdf_report(self, db):
+        rid = insert_manual_report(
+            db,
+            title="Microsoft Q3 FY2026 Earnings",
+            source_type="pdf",
+            original_filename="msft_q3_fy26.pdf",
+            file_path="data/manual_reports/abc123.pdf",
+            text_path="data/manual_reports/abc123.txt",
+            summary="Cloud+AI revenue $37B, +123% YoY...",
+        )
+        rows = db.table("manual_reports").rows()
+        assert rows[0]["source_type"] == "pdf"
+        assert rows[0]["original_filename"] == "msft_q3_fy26.pdf"
+        assert rows[0]["file_path"].endswith(".pdf")
+        assert str(rows[0]["id"]) == rid
+
+    def test_insert_rejects_invalid_source_type(self, db):
+        with pytest.raises(ValueError, match="source_type"):
+            insert_manual_report(
+                db,
+                title="x",
+                source_type="other",
+                url="https://x.com",
+            )
+
+    def test_get_all_sorted_desc(self, db):
+        # 시간 순서를 강제하기 위해 직접 row 삽입
+        from datetime import datetime as _dt
+        for added_at, title in [
+            ("2026-05-10T10:00:00", "Older"),
+            ("2026-05-12T10:00:00", "Newer"),
+        ]:
+            db.table("manual_reports").append({
+                "id": _dt.now().strftime("%Y%m%d%H%M%S") + title,
+                "added_at": added_at,
+                "title": title,
+                "source_type": "url",
+                "url": "https://example.com/" + title,
+                "original_filename": "",
+                "file_path": "",
+                "text_path": "",
+                "summary": "",
+                "added_by": "user",
+            })
+
+        results = get_all_manual_reports(db)
+        assert len(results) == 2
+        assert results[0]["title"] == "Newer"
+
+    def test_get_manual_report_by_id(self, db):
+        rid = insert_manual_report(
+            db, title="Sample", source_type="url",
+            url="https://example.com/s",
+        )
+        found = get_manual_report(db, rid)
+        assert found is not None
+        assert found["title"] == "Sample"
+        assert str(found["id"]) == rid
+
+    def test_get_manual_report_missing_returns_none(self, db):
+        assert get_manual_report(db, "nonexistent-id") is None
+
+    def test_clear_all_reports(self, db):
+        insert_manual_report(db, title="A", source_type="url", url="https://a.com")
+        insert_manual_report(db, title="B", source_type="url", url="https://b.com")
+        assert len(db.table("manual_reports").rows()) == 2
+
+        deleted = clear_all_manual_reports(db)
+        assert deleted == 2
+        assert len(db.table("manual_reports").rows()) == 0
