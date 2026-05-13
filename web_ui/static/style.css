@@ -378,3 +378,76 @@ body {
 
 /* ── 유틸리티 ── */
 .hidden { display: none !important; }
+
+/* ── 출처 그룹 접힘/펼침 (1.3) ── */
+.source-group .source-label {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.source-group .source-label:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+.source-group .toggle-icon {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  font-weight: bold;
+  font-family: 'Consolas', monospace;
+  color: #2d5a8e;
+}
+.source-group .source-count {
+  color: #888;
+  font-weight: normal;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+/* ── 핵심 인사이트 입력 (2-1) ── */
+.insight-input-section {
+  margin: 16px 0;
+}
+.insight-input-section label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.insight-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.insight-hint {
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* ── 편집 가능 미리보기 (2-2) ── */
+.preview-editable {
+  border: 2px dashed #2d5a8e;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+  min-height: 300px;
+}
+.preview-editable:focus-within {
+  border-style: solid;
+  background: #fff;
+}
+.preview-editable-hint {
+  font-size: 12px;
+  color: #2d5a8e;
+  margin-bottom: 8px;
+  font-weight: 600;
+}

@@ -291,19 +291,22 @@ def create_app(config: dict, db_conn) -> Flask:
     def weekly_page():
         db = get_db()
         articles = get_weekly_articles(db, days=7)
-        # 날짜별 그룹핑
-        grouped = {}
+        # 출처(source_name)별 그룹핑 — 각 출처 안에서는 최신순 (입력 articles가 이미 정렬됨)
+        grouped: dict[str, list] = {}
         for a in articles:
-            pub = str(a.get("published_at", ""))
-            date_key = pub[:10] if pub else "unknown"
-            grouped.setdefault(date_key, []).append(a)
+            src = (a.get("source_name") or "Unknown").strip() or "Unknown"
+            grouped.setdefault(src, []).append(a)
+        # 그룹 이름순 정렬 + 기사 많은 출처 우선 (보조 정렬)
+        grouped_sorted = dict(
+            sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0].lower()))
+        )
         # 수동 추가 기사
         manual_articles = get_all_manual_articles(db)
         # 수동 추가 보고서 (PR3)
         manual_reports = get_all_manual_reports(db)
         return render_template(
             "weekly.html",
-            grouped_articles=grouped,
+            grouped_articles=grouped_sorted,
             manual_articles=manual_articles,
             manual_reports=manual_reports,
             total_count=len(articles) + len(manual_articles),
@@ -512,6 +515,7 @@ def create_app(config: dict, db_conn) -> Flask:
         data = request.get_json() or {}
         articles = data.get("articles", [])
         report_refs = data.get("reports", []) or []
+        expert_insight = (data.get("expert_insight") or "").strip()
 
         if not articles and not report_refs:
             return jsonify({
@@ -549,7 +553,9 @@ def create_app(config: dict, db_conn) -> Flask:
             claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
             claude = ClaudeService(get_cfg(), claude_api_key)
             markdown = claude.generate_weekly(
-                articles, existing_summaries, reports=selected_reports or None,
+                articles, existing_summaries,
+                reports=selected_reports or None,
+                expert_insight=expert_insight,
             )
 
             date_display = get_kst_display_date()
@@ -566,9 +572,15 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/weekly/publish", methods=["POST"])
     def weekly_publish():
-        """Weekly 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업)."""
+        """Weekly 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
+
+        2-2: ``edited_html``이 있으면 사용자가 미리보기에서 직접 편집한 HTML을
+        그대로 이메일에 사용. 없으면 ``markdown``을 ``render_email_html``로
+        변환 (기존 동작).
+        """
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
+        edited_html = (data.get("edited_html") or "").strip()
         if not markdown:
             return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
 
@@ -581,6 +593,8 @@ def create_app(config: dict, db_conn) -> Flask:
         results = {"email": None, "drive": None, "notebooklm": None, "backup": None}
 
         # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
+        # 주의: Drive에는 markdown을 저장 (편집된 HTML이 아님 — Drive Doc은 마크다운
+        # 변환 기반). 편집된 HTML은 이메일에만 적용됨.
         drive_doc_id = None
         drive_doc_url = ""
         try:
@@ -598,7 +612,13 @@ def create_app(config: dict, db_conn) -> Flask:
         # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("weekly", [])
-            html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
+            if edited_html:
+                # 사용자가 미리보기 편집 → 그 HTML을 그대로 발송 (Drive 링크 갱신만 시도)
+                html_body = edited_html
+                logger.info("Weekly 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
+            else:
+                html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
+                logger.info("Weekly 발송: markdown→HTML 렌더 사용")
             subject = build_email_subject("weekly", date_str)
 
             creds = get_google_credentials(creds_path, token_path)

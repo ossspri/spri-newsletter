@@ -78,6 +78,7 @@ def build_weekly_prompt(
     article_list: str,
     existing_summaries: str,
     reports: list[dict] | None = None,
+    expert_insight: str = "",
 ) -> str:
     """Weekly 보고서 생성용 프롬프트를 조립한다.
 
@@ -88,6 +89,11 @@ def build_weekly_prompt(
             None 또는 빈 list면 ``<reports>`` 블록을 prompt에서 생략 — 기존
             동작 보존. 있으면 별도 블록으로 주입하여 LLM이 "1차 자료"로
             인식, 직접 인용을 우선하도록 가이드.
+        expert_insight: 전문가가 직접 입력한 금주 핵심 인사이트 텍스트.
+            비어있으면 기존 동작 (기사·보고서 자체에서 추출). 입력되면
+            ``<expert_insight>`` 블록을 prompt 상단에 주입하고, LLM이
+            이 인사이트와 관련 있는 기사·보고서를 식별해 해당 자료의 요약을
+            인사이트 맥락으로 증강하여 본문에 반영하도록 지시.
     """
     if reports:
         report_block = (
@@ -102,10 +108,27 @@ def build_weekly_prompt(
     else:
         report_block = ""
 
+    if expert_insight and expert_insight.strip():
+        insight_block = (
+            "\n<expert_insight>\n"
+            "아래는 SPRi 전문가가 직접 작성한 금주 핵심 인사이트입니다. "
+            "본 보고서 작성 시 이 인사이트를 다음과 같이 반영하십시오:\n"
+            "  1. 보고서의 '## 1. 개요' 섹션에 이 인사이트를 첫 트렌드로 명확히 반영할 것.\n"
+            "  2. 제공된 기사·보고서 중 이 인사이트와 직접 관련된 것을 식별하고, 해당 "
+            "자료의 본문 요약을 인사이트 맥락으로 재해석·증강하여 작성할 것. 단순 "
+            "요약이 아니라, 인사이트와 어떻게 연결되는지가 드러나도록 분석할 것.\n"
+            "  3. 인사이트와 무관한 자료도 그대로 다른 섹션에 반영하되, 본 인사이트가 "
+            "보고서 전체 톤을 결정하는 가장 중요한 메시지임을 인식할 것.\n\n"
+            + expert_insight.strip()
+            + "\n</expert_insight>\n"
+        )
+    else:
+        insight_block = ""
+
     return """<role>
 당신은 소프트웨어정책연구소(SPRi)의 주간 산업분석 에이전트입니다.
 </role>
-
+{insight_block}
 <main_task>
 아래 제공된 기사 목록을 기반으로 금주 글로벌 SW 산업 주간 동향 보고서를 작성하십시오.
 
@@ -164,6 +187,7 @@ ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가
         article_list=article_list,
         existing_summaries=existing_summaries or "(없음)",
         report_block=report_block,
+        insight_block=insight_block,
     )
 
 

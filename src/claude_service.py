@@ -50,6 +50,7 @@ class ClaudeService:
         articles: list[dict],
         existing_summaries: str = "",
         reports: list[dict] | None = None,
+        expert_insight: str = "",
     ) -> str:
         """Weekly 보고서 마크다운을 생성한다.
 
@@ -59,15 +60,20 @@ class ClaudeService:
             reports: 수동 첨부 1차 자료 (PR3). None/빈 list면 기존 동작.
                 안전 한도: 상위 5건까지만 prompt에 주입 (체크박스로 더
                 선택해도 토큰 폭증 방지).
+            expert_insight: 전문가가 직접 입력한 금주 핵심 인사이트.
+                LLM이 이를 반영하여 관련 기사·보고서 요약을 증강.
         """
         article_text = format_articles_for_prompt(articles)
         trimmed_reports = (reports or [])[:5]
-        prompt = build_weekly_prompt(article_text, existing_summaries,
-                                     reports=trimmed_reports or None)
+        prompt = build_weekly_prompt(
+            article_text, existing_summaries,
+            reports=trimmed_reports or None,
+            expert_insight=expert_insight or "",
+        )
 
         logger.info(
-            "Weekly 보고서 생성 시작 (기사 %d건, 보고서 %d건, 모델: %s)",
-            len(articles), len(trimmed_reports), self.model,
+            "Weekly 보고서 생성 시작 (기사 %d건, 보고서 %d건, 인사이트 %d자, 모델: %s)",
+            len(articles), len(trimmed_reports), len(expert_insight or ""), self.model,
         )
         raw = self._call_api(prompt)
         result = self._postprocess(raw)
