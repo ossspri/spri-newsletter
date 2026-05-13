@@ -291,22 +291,13 @@ def create_app(config: dict, db_conn) -> Flask:
     def weekly_page():
         db = get_db()
         articles = get_weekly_articles(db, days=7)
-        # 출처(source_name)별 그룹핑 — 각 출처 안에서는 최신순 (입력 articles가 이미 정렬됨)
-        grouped: dict[str, list] = {}
-        for a in articles:
-            src = (a.get("source_name") or "Unknown").strip() or "Unknown"
-            grouped.setdefault(src, []).append(a)
-        # 그룹 이름순 정렬 + 기사 많은 출처 우선 (보조 정렬)
-        grouped_sorted = dict(
-            sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0].lower()))
-        )
         # 수동 추가 기사
         manual_articles = get_all_manual_articles(db)
         # 수동 추가 보고서 (PR3)
         manual_reports = get_all_manual_reports(db)
         return render_template(
             "weekly.html",
-            grouped_articles=grouped_sorted,
+            weekly_articles=articles,  # 출처 그룹 없이 단일 list (1.3 수정)
             manual_articles=manual_articles,
             manual_reports=manual_reports,
             total_count=len(articles) + len(manual_articles),
