@@ -6,8 +6,11 @@ venv/
 # Credentials
 credentials/
 
-# Data
-data/
+# Data — 발행 결과물(.md, .csv)은 git으로 동료와 공유.
+# 개인용·런타임 파일만 무시 (data/drive_state.json, data/manual_reports/, 레거시 sqlite).
+data/drive_state.json
+data/manual_reports/
+data/spri_newsletter.db
 logs/
 
 # Python

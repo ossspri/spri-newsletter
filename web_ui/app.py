@@ -42,6 +42,7 @@ from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
 from src.drive_service import DriveService
+from src.git_sync import GitSync, GitSyncError
 from src.notebooklm_service import (
     NotebookLMService, check_nlm_auth, reauth_nlm_open, reauth_nlm_save,
 )
@@ -237,7 +238,18 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "drive": None, "notebooklm": None}
+        results = {"email": None, "drive": None, "notebooklm": None, "git_sync": None}
+
+        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
+        git_sync = GitSync(BASE_DIR, cfg)
+        try:
+            git_sync.pull_or_fail()
+        except GitSyncError as e:
+            logger.error("git_sync pull 실패 — Daily 발송 차단: %s", e)
+            return jsonify({
+                "success": False,
+                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
+            }), 409
 
         # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
         drive_doc_id = None
@@ -282,6 +294,14 @@ def create_app(config: dict, db_conn) -> Flask:
             db, "daily", 0, len(recipients), "success",
             drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
         )
+
+        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
+        try:
+            results["git_sync"] = git_sync.commit_and_push("daily", date_str)
+        except Exception as e:
+            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
+            results["git_sync"] = {"committed": False, "pushed": False,
+                                   "skipped": "exception", "error": str(e)}
 
         return jsonify({"success": True, "results": results})
 
@@ -581,7 +601,19 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "drive": None, "notebooklm": None, "backup": None}
+        results = {"email": None, "drive": None, "notebooklm": None,
+                   "backup": None, "git_sync": None}
+
+        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
+        git_sync = GitSync(BASE_DIR, cfg)
+        try:
+            git_sync.pull_or_fail()
+        except GitSyncError as e:
+            logger.error("git_sync pull 실패 — Weekly 발송 차단: %s", e)
+            return jsonify({
+                "success": False,
+                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
+            }), 409
 
         # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
         # 주의: Drive에는 markdown을 저장 (편집된 HTML이 아님 — Drive Doc은 마크다운
@@ -672,6 +704,14 @@ def create_app(config: dict, db_conn) -> Flask:
             db, "weekly", 0, len(recipients), "success",
             drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
         )
+
+        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
+        try:
+            results["git_sync"] = git_sync.commit_and_push("weekly", date_str)
+        except Exception as e:
+            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
+            results["git_sync"] = {"committed": False, "pushed": False,
+                                   "skipped": "exception", "error": str(e)}
 
         return jsonify({"success": True, "results": results})
 

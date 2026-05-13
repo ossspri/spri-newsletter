@@ -107,6 +107,12 @@ features:
   # check_today_sent을 Gmail Sent 검색으로 위임 (멀티 PC에서도 안전).
   # false 또는 GmailService 미주입 시 newsletter_log.csv로 fallback.
   gmail_dedup: true
+  # 발행 결과물(.md, .csv) git 자동 동기화 (P0 2026-05-13).
+  # publish 직전 git pull --rebase, 직후 data/newsletters·data/db 변경분
+  # commit + push. flag off 시 모두 no-op (로컬 백업만).
+  git_autosync: true
+  # 실제 git 명령 없이 로그만 (배포 전 검증용).
+  git_autosync_dry_run: false
 
 # ── 로깅 ──
 logging:
