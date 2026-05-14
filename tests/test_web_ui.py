@@ -25,8 +25,6 @@ SAMPLE_CONFIG = {
         "daily": ["analyst1@spri.kr", "analyst2@spri.kr"],
         "weekly": ["director@spri.kr"],
     },
-    "drive": {"folder_id": "FAKE_FOLDER_ID"},
-    "notebooklm": {"notebook_prefix": "SPRi"},
     "web_ui": {"host": "127.0.0.1", "port": 5000},
     "logging": {"level": "INFO", "file": "logs/spri.log"},
 }
@@ -186,22 +184,14 @@ class TestDailyGenerate:
 class TestDailyPublish:
     """POST /daily/publish 뉴스레터 발간 테스트 (이메일 + Drive + NotebookLM)."""
 
-    @patch("web_ui.app.NotebookLMService")
     @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
     @patch("web_ui.app.GmailService")
-    def test_publish_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, client):
+    def test_publish_success(self, mock_gmail_cls, mock_auth, client):
         """발간 성공 시 3단계 결과를 모두 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg123"}
         mock_gmail_cls.return_value = mock_gmail
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_abc123"
-        mock_drive_cls.return_value = mock_drive
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_xyz"
-        mock_nlm_cls.return_value = mock_nlm
 
         resp = client.post(
             "/daily/publish",
@@ -213,7 +203,6 @@ class TestDailyPublish:
         assert resp.status_code == 200
         assert data["success"] is True
         assert data["results"]["email"]["success"] is True
-        assert data["results"]["drive"]["success"] is True
 
     def test_publish_missing_markdown(self, client):
         """마크다운 없이 요청하면 에러를 반환한다."""
@@ -382,22 +371,14 @@ class TestWeeklyPublish:
 
     @patch("pathlib.Path.write_text")
     @patch("pathlib.Path.mkdir")
-    @patch("web_ui.app.NotebookLMService")
     @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
     @patch("web_ui.app.GmailService")
-    def test_publish_weekly_success(self, mock_gmail_cls, mock_drive_cls, mock_auth, mock_nlm_cls, mock_mkdir, mock_write, client):
+    def test_publish_weekly_success(self, mock_gmail_cls, mock_auth, mock_mkdir, mock_write, client):
         """발간 성공 시 전체 결과를 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg456"}
         mock_gmail_cls.return_value = mock_gmail
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_weekly_123"
-        mock_drive_cls.return_value = mock_drive
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_weekly_xyz"
-        mock_nlm_cls.return_value = mock_nlm
 
         resp = client.post(
             "/weekly/publish",
@@ -409,7 +390,6 @@ class TestWeeklyPublish:
         assert resp.status_code == 200
         assert data["success"] is True
         assert data["results"]["email"]["success"] is True
-        assert data["results"]["drive"]["success"] is True
 
     def test_publish_weekly_missing_markdown(self, client):
         """마크다운 없이 요청하면 에러를 반환한다."""

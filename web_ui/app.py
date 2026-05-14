@@ -1,8 +1,9 @@
-"""web_ui/app.py — Flask 웹 UI (Daily + Weekly 탭 통합)
+"""web_ui/app.py — Flask 웹 UI (Daily + Weekly + Focus 3탭)
 
-PRD 8: 전문가용 로컬 웹 UI.
-Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발간(이메일+Drive+NotebookLM) 3단계
-Weekly 탭: 기사 선택(N/25) → 생성 → 발간(이메일+Drive+NotebookLM+로컬백업)
+전문가용 로컬 웹 UI. 2026-05-15 Drive/NotebookLM 통합 제거 (로컬+git 공유 방향).
+Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발간(Gmail 발송)
+Weekly 탭: 자동 daily 기사 선택 → 생성 → 발간 (표준)
+Focus 탭: 수동 기사·보고서·전문가 인사이트·편집 미리보기 → 발간 (큐레이션)
 """
 import logging
 import os
@@ -41,11 +42,7 @@ from src.news_service import GNewsService
 from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
-from src.drive_service import DriveService
 from src.git_sync import GitSync, GitSyncError
-from src.notebooklm_service import (
-    NotebookLMService, check_nlm_auth, reauth_nlm_open, reauth_nlm_save,
-)
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -226,7 +223,7 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/daily/publish", methods=["POST"])
     def daily_publish():
-        """Daily 뉴스레터를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM 저장)."""
+        """Daily 뉴스레터를 발간한다 (Gmail 발송 → 로그 기록)."""
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
         if not markdown:
@@ -238,7 +235,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "drive": None, "notebooklm": None, "git_sync": None}
+        results = {"email": None, "git_sync": None}
 
         # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
         git_sync = GitSync(BASE_DIR, cfg)
@@ -251,25 +248,10 @@ def create_app(config: dict, db_conn) -> Flask:
                 "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
             }), 409
 
-        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
-        drive_doc_id = None
-        drive_doc_url = ""
-        try:
-            folder_id = cfg.get("drive", {}).get("folder_id", "")
-            creds = get_google_credentials(creds_path, token_path)
-            drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "daily", date_str, folder_id)
-            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
-            results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Drive 저장 완료: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Drive 저장 실패 (계속 진행): %s", e)
-            results["drive"] = {"success": False, "error": str(e)}
-
         # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("daily", [])
-            html_body = render_email_html(markdown, "daily", date_display, drive_doc_url)
+            html_body = render_email_html(markdown, "daily", date_display)
             subject = build_email_subject("daily", date_str)
 
             creds = get_google_credentials(creds_path, token_path)
@@ -286,14 +268,8 @@ def create_app(config: dict, db_conn) -> Flask:
                 "results": results,
             }), 500
 
-        # Daily는 NotebookLM 저장 생략 (Weekly 발간 시 저장)
-        nlm_notebook = None
-
         # ── 발송 이력 기록 ──
-        log_newsletter(
-            db, "daily", 0, len(recipients), "success",
-            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
-        )
+        log_newsletter(db, "daily", 0, len(recipients), "success")
 
         # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
         try:
@@ -379,10 +355,9 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/weekly/publish", methods=["POST"])
     def weekly_publish():
-        """Weekly 표준 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
+        """Weekly 표준 보고서를 발간한다 (Gmail 발송 → 로컬 백업).
 
-        2026-05-15 분리: ``edited_html`` 옵션은 Focus 라우트로 이동.
-        Weekly는 markdown → render_email_html 표준 흐름만.
+        2026-05-15 Drive/NotebookLM 통합 제거. Gmail 발송 + 로컬 .md 백업만.
         """
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
@@ -395,8 +370,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "drive": None, "notebooklm": None,
-                   "backup": None, "git_sync": None}
+        results = {"email": None, "backup": None, "git_sync": None}
 
         # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
         git_sync = GitSync(BASE_DIR, cfg)
@@ -409,27 +383,10 @@ def create_app(config: dict, db_conn) -> Flask:
                 "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
             }), 409
 
-        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
-        # 주의: Drive에는 markdown을 저장 (편집된 HTML이 아님 — Drive Doc은 마크다운
-        # 변환 기반). 편집된 HTML은 이메일에만 적용됨.
-        drive_doc_id = None
-        drive_doc_url = ""
-        try:
-            folder_id = cfg.get("drive", {}).get("folder_id", "")
-            creds = get_google_credentials(creds_path, token_path)
-            drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
-            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
-            results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
-            results["drive"] = {"success": False, "error": str(e)}
-
         # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("weekly", [])
-            html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
+            html_body = render_email_html(markdown, "weekly", date_display)
             subject = build_email_subject("weekly", date_str)
 
             creds = get_google_credentials(creds_path, token_path)
@@ -446,32 +403,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 "results": results,
             }), 500
 
-        # ── Step 5: NotebookLM 저장 + 로컬 백업 (사전 인증 체크) ──
-        nlm_notebook = None
-        auth_status = check_nlm_auth()
-        if not auth_status["valid"]:
-            logger.warning("NotebookLM 인증 만료, 건너뜀: %s", auth_status["reason"])
-            results["notebooklm"] = {"success": False, "error": auth_status["reason"],
-                                     "skipped": True}
-        else:
-            try:
-                articles = get_weekly_articles(db, days=7)
-                if articles:
-                    nlm = NotebookLMService(cfg)
-                    nlm_notebook = nlm.save_sources(
-                        date_str,
-                        [{"title": a["title"], "url": a["url"]} for a in articles],
-                        markdown,
-                    )
-                    results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                    logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
-                else:
-                    results["notebooklm"] = {"success": True, "notebook_id": None}
-                    logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
-            except Exception as e:
-                logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
-                results["notebooklm"] = {"success": False, "error": str(e)}
-
         # 로컬 마크다운 백업
         try:
             backup_dir = BASE_DIR / "data" / "newsletters"
@@ -485,10 +416,7 @@ def create_app(config: dict, db_conn) -> Flask:
             results["backup"] = {"success": False, "error": str(e)}
 
         # ── 발송 이력 기록 ──
-        log_newsletter(
-            db, "weekly", 0, len(recipients), "success",
-            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
-        )
+        log_newsletter(db, "weekly", 0, len(recipients), "success")
 
         # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
         try:
@@ -778,7 +706,7 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/focus/publish", methods=["POST"])
     def focus_publish():
-        """Focus 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
+        """Focus 보고서를 발간한다 (Gmail 발송 → 로컬 백업).
 
         2-2: ``edited_html``이 있으면 사용자가 미리보기에서 직접 편집한 HTML을
         그대로 이메일에 사용. 없으면 ``markdown``을 ``render_email_html``로
@@ -796,8 +724,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "drive": None, "notebooklm": None,
-                   "backup": None, "git_sync": None}
+        results = {"email": None, "backup": None, "git_sync": None}
 
         # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
         git_sync = GitSync(BASE_DIR, cfg)
@@ -810,23 +737,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
             }), 409
 
-        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
-        # 주의: Drive에는 markdown을 저장 (편집된 HTML이 아님 — Drive Doc은 마크다운
-        # 변환 기반). 편집된 HTML은 이메일에만 적용됨.
-        drive_doc_id = None
-        drive_doc_url = ""
-        try:
-            folder_id = cfg.get("drive", {}).get("folder_id", "")
-            creds = get_google_credentials(creds_path, token_path)
-            drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "focus", date_str, folder_id)
-            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
-            results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Focus Drive 저장 완료: %s", drive_doc_id)
-        except Exception as e:
-            logger.error("Focus Drive 저장 실패 (계속 진행): %s", e)
-            results["drive"] = {"success": False, "error": str(e)}
-
         # ── Step 4: Gmail 발송 ──
         try:
             recipients = cfg.get("recipients", {}).get("focus", [])
@@ -835,7 +745,7 @@ def create_app(config: dict, db_conn) -> Flask:
                 html_body = edited_html
                 logger.info("Focus 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
             else:
-                html_body = render_email_html(markdown, "focus", date_display, drive_doc_url)
+                html_body = render_email_html(markdown, "focus", date_display)
                 logger.info("Focus 발송: markdown→HTML 렌더 사용")
             subject = build_email_subject("focus", date_str)
 
@@ -853,35 +763,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 "results": results,
             }), 500
 
-        # ── Step 5: NotebookLM 저장 + 로컬 백업 (사전 인증 체크) ──
-        nlm_notebook = None
-        auth_status = check_nlm_auth()
-        if not auth_status["valid"]:
-            logger.warning("NotebookLM 인증 만료, 건너뜀: %s", auth_status["reason"])
-            results["notebooklm"] = {"success": False, "error": auth_status["reason"],
-                                     "skipped": True}
-        else:
-            try:
-                articles = get_weekly_articles(db, days=7)
-                manual = get_all_manual_articles(db)
-                all_articles = articles + manual
-                if all_articles:
-                    nlm = NotebookLMService(cfg)
-                    nlm_notebook = nlm.save_sources(
-                        date_str,
-                        [{"title": a["title"], "url": a["url"]} for a in all_articles],
-                        markdown,
-                    )
-                    results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                    logger.info("Focus NotebookLM 저장 완료: %s (수동 %d건 포함)",
-                                nlm_notebook, len(manual))
-                else:
-                    results["notebooklm"] = {"success": True, "notebook_id": None}
-                    logger.info("Focus NotebookLM 건너뜀: 기사 없음")
-            except Exception as e:
-                logger.error("Focus NotebookLM 저장 실패 (계속 진행): %s", e)
-                results["notebooklm"] = {"success": False, "error": str(e)}
-
         # 로컬 마크다운 백업
         try:
             backup_dir = BASE_DIR / "data" / "newsletters"
@@ -895,10 +776,7 @@ def create_app(config: dict, db_conn) -> Flask:
             results["backup"] = {"success": False, "error": str(e)}
 
         # ── 발송 이력 기록 ──
-        log_newsletter(
-            db, "focus", 0, len(recipients), "success",
-            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
-        )
+        log_newsletter(db, "focus", 0, len(recipients), "success")
 
         # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
         try:
@@ -914,13 +792,12 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/reset-today", methods=["POST"])
     def reset_today():
-        """오늘 날짜의 기사·아카이브·백업·NotebookLM 소스를 초기화한다 (수동 테스트용).
+        """오늘 날짜의 기사·아카이브·로컬 백업을 초기화한다 (수동 테스트용).
 
         발송 이력(newsletter_log)은 보존한다.
         """
         try:
             db = get_db()
-            cfg = get_cfg()
             date_str = get_kst_date_str()
 
             # article_archive에서 오늘 데이터 삭제
@@ -935,26 +812,16 @@ def create_app(config: dict, db_conn) -> Flask:
             # 로컬 백업 파일 삭제
             backup_dir = BASE_DIR / "data" / "newsletters"
             files_deleted = []
-            for pattern in [f"daily_{date_str}.md", f"weekly_{date_str}.md"]:
+            for pattern in [f"daily_{date_str}.md", f"weekly_{date_str}.md",
+                            f"focus_{date_str}.md"]:
                 filepath = backup_dir / pattern
                 if filepath.exists():
                     filepath.unlink()
                     files_deleted.append(pattern)
 
-            # NotebookLM 소스 삭제
-            nlm_result = {"deleted_count": 0}
-            try:
-                nlm = NotebookLMService(cfg)
-                nlm_result = nlm.delete_today_sources(date_str)
-            except Exception as e:
-                logger.error("NotebookLM 소스 삭제 실패 (계속 진행): %s", e)
-                nlm_result = {"deleted_count": 0, "error": str(e)}
-
             logger.info(
-                "테스트 초기화 완료: 아카이브 %d건, daily %d건, manual %d건, "
-                "파일 %s, NotebookLM %d건",
-                archive_deleted, daily_deleted, manual_deleted,
-                files_deleted, nlm_result["deleted_count"],
+                "테스트 초기화 완료: 아카이브 %d건, daily %d건, manual %d건, 파일 %s",
+                archive_deleted, daily_deleted, manual_deleted, files_deleted,
             )
             return jsonify({
                 "success": True,
@@ -963,63 +830,10 @@ def create_app(config: dict, db_conn) -> Flask:
                 "daily_deleted": daily_deleted,
                 "manual_deleted": manual_deleted,
                 "files_deleted": files_deleted,
-                "nlm_deleted": nlm_result["deleted_count"],
             })
         except Exception as e:
             logger.error("테스트 초기화 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
-
-    @app.route("/nlm/status")
-    def nlm_status():
-        """NotebookLM 인증 상태를 반환한다."""
-        try:
-            result = check_nlm_auth()
-            return jsonify({"success": True, **result})
-        except Exception as e:
-            logger.error("NotebookLM 인증 체크 실패: %s", e)
-            return jsonify({"success": True, "valid": False,
-                            "reason": f"체크 실패: {e}",
-                            "login_date": None, "expires_in_hours": None})
-
-    @app.route("/nlm/reauth/open", methods=["POST"])
-    def nlm_reauth_open():
-        """NotebookLM 재인증 브라우저를 연다."""
-        result = reauth_nlm_open()
-        return jsonify(result)
-
-    @app.route("/nlm/reauth/save", methods=["POST"])
-    def nlm_reauth_save():
-        """NotebookLM 재인증 브라우저에서 쿠키를 저장하고 닫는다."""
-        result = reauth_nlm_save()
-        return jsonify(result)
-
-    @app.route("/nlm/save", methods=["POST"])
-    def nlm_save_weekly():
-        """Weekly 기사를 NotebookLM에 저장한다 (재인증 후 재시도용)."""
-        try:
-            db = get_db()
-            cfg = get_cfg()
-            date_str = get_kst_date_str()
-            data = request.get_json() or {}
-            markdown = data.get("markdown", "")
-
-            articles = get_weekly_articles(db, days=7)
-            manual = get_all_manual_articles(db)
-            all_articles = articles + manual
-            if not all_articles:
-                return jsonify({"success": True, "notebook_id": None})
-
-            nlm = NotebookLMService(cfg)
-            notebook_id = nlm.save_sources(
-                date_str,
-                [{"title": a["title"], "url": a["url"]} for a in all_articles],
-                markdown,
-            )
-            logger.info("NotebookLM 재시도 저장 완료: %s", notebook_id)
-            return jsonify({"success": True, "notebook_id": notebook_id})
-        except Exception as e:
-            logger.error("NotebookLM 재시도 저장 실패: %s", e)
-            return jsonify({"success": False, "error": str(e)})
 
     @app.route("/preview", methods=["POST"])
     def preview():

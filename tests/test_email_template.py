@@ -61,11 +61,6 @@ class TestRenderEmailHtml:
         # * [title](url) → <a>
         assert "https://example.com/policy" in html
 
-    def test_drive_button_when_url_provided(self):
-        html = render_email_html(SAMPLE_MARKDOWN, "daily", "2026년 3월 29일",
-                                 drive_doc_url="https://docs.google.com/doc/123")
-        assert "구글 문서에서 전문 보기" in html
-        assert "https://docs.google.com/doc/123" in html
 
     def test_no_drive_button_when_no_url(self):
         html = render_email_html(SAMPLE_MARKDOWN, "daily", "2026년 3월 29일")

@@ -2,13 +2,10 @@
 anthropic>=0.40.0
 mcp>=1.0.0  # Industry-scan (A') prism-data MCP stdio client
 
-# Google APIs (Gmail/Drive 발송 및 Drive 아카이브용)
+# Google APIs (Gmail 발송 전용 — Drive/NotebookLM 제거, 2026-05-15)
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
-
-# NotebookLM
-notebooklm-py>=0.1.0
 
 # Web UI
 flask>=3.0.0

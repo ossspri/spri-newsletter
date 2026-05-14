@@ -245,14 +245,20 @@ class TestLogNewsletter:
         assert len(records) == 1
         assert records[0]["recipient_count"] == 3
 
-    def test_log_with_optional_fields(self, db):
+    def test_log_with_error_message(self, db):
+        """log_newsletter error_message 필드 검증.
+
+        2026-05-15 drive_doc_id·nlm_notebook 컬럼 제거 후 단순화.
+        """
         log_newsletter(
-            db, "weekly", 20, 5, "success",
-            drive_doc_id="doc_123", nlm_notebook="SPRi_2026_0330",
+            db, "weekly", 20, 5, "failed",
+            error_message="Gmail SMTP timeout",
         )
         records = db.table("newsletter_log").rows()
-        assert records[0]["drive_doc_id"] == "doc_123"
-        assert records[0]["nlm_notebook"] == "SPRi_2026_0330"
+        assert records[0]["status"] == "failed"
+        assert records[0]["error_message"] == "Gmail SMTP timeout"
+        assert "drive_doc_id" not in records[0]
+        assert "nlm_notebook" not in records[0]
 
 
 # ── archive_articles ──

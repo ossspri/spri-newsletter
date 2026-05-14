@@ -8,28 +8,21 @@ from src.google_auth import get_google_credentials, SCOPES
 
 
 class TestScopes:
-    """OAuth2 스코프 설정 테스트."""
+    """SCOPES 정의 검증 — 2026-05-15 Drive/NotebookLM 제거 후 Gmail 2개만."""
+
+    def test_scopes_count(self):
+        assert len(SCOPES) == 2
 
     def test_scopes_include_gmail_send(self):
         assert "https://www.googleapis.com/auth/gmail.send" in SCOPES
 
     def test_scopes_include_gmail_readonly(self):
-        """PR#2: Gmail Sent dedup의 messages.list q 검색에 필요.
-        gmail.metadata는 q 파라미터를 거부하므로 readonly 사용."""
         assert "https://www.googleapis.com/auth/gmail.readonly" in SCOPES
 
-    def test_scopes_include_drive_file(self):
-        assert "https://www.googleapis.com/auth/drive.file" in SCOPES
-
-    def test_scopes_include_documents(self):
-        assert "https://www.googleapis.com/auth/documents" in SCOPES
-
-    def test_scopes_count(self):
-        assert len(SCOPES) == 5
-
-    def test_spreadsheets_scope(self):
-        assert "https://www.googleapis.com/auth/spreadsheets" in SCOPES
-
+    def test_drive_scopes_removed(self):
+        assert not any("drive" in s for s in SCOPES)
+        assert not any("documents" in s for s in SCOPES)
+        assert not any("spreadsheets" in s for s in SCOPES)
 
 class TestGetGoogleCredentials:
     """자격증명 로드/갱신/발급 테스트."""

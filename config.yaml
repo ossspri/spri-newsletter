@@ -85,18 +85,6 @@ recipients:
   weekly:
     - "hsy@spri.kr"
 
-# ── Google Sheets (DB) ──
-google_sheets:
-  spreadsheet_id: "1qVL5oxeNfh7SeTDVi_naqyle2RaW2TnigK4wlSYrlS0"
-
-# ── Google Drive ──
-drive:
-  folder_id: "1D9K1kwSogf1imTRSXv3hhoKHJmODwwsk"
-
-# ── NotebookLM ──
-notebooklm:
-  notebook_prefix: "SPRi"
-
 # ── 웹 UI ──
 web_ui:
   host: "127.0.0.1"

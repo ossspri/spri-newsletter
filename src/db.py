@@ -36,11 +36,11 @@ SHEET_HEADERS: dict[str, list[str]] = {
     ],
     "article_archive": [
         "id", "newsletter_date", "newsletter_type", "section",
-        "article_title", "article_url", "nlm_notebook_id",
+        "article_title", "article_url",
     ],
     "newsletter_log": [
         "id", "sent_at", "type", "article_count", "recipient_count",
-        "status", "error_message", "drive_doc_id", "nlm_notebook",
+        "status", "error_message",
     ],
     "manual_reports": [
         # PR (Weekly 수동 보고서 추가): URL/PDF 1차 자료 첨부.
@@ -363,10 +363,11 @@ def log_newsletter(
     recipient_count: int,
     status: str,
     error_message: str = None,
-    drive_doc_id: str = None,
-    nlm_notebook: str = None,
 ) -> None:
-    """newsletter_log에 발송 이력을 기록한다."""
+    """newsletter_log에 발송 이력을 기록한다.
+
+    2026-05-15 Drive/NotebookLM 통합 제거: drive_doc_id·nlm_notebook 컬럼 제거.
+    """
     db.table("newsletter_log").append({
         "id": _gen_id(),
         "sent_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -375,8 +376,6 @@ def log_newsletter(
         "recipient_count": recipient_count,
         "status": status,
         "error_message": error_message or "",
-        "drive_doc_id": drive_doc_id or "",
-        "nlm_notebook": nlm_notebook or "",
     })
     logger.info("뉴스레터 로그 기록: type=%s, status=%s", newsletter_type, status)
 
@@ -386,9 +385,11 @@ def archive_articles(
     newsletter_date: str,
     newsletter_type: str,
     articles_data: list[dict],
-    nlm_notebook_id: str = None,
 ) -> None:
-    """article_archive에 기사를 아카이브한다."""
+    """article_archive에 기사를 아카이브한다.
+
+    2026-05-15 nlm_notebook_id 컬럼 제거.
+    """
     rows = [
         {
             "id": _gen_id(),
@@ -397,7 +398,6 @@ def archive_articles(
             "section": a.get("section", ""),
             "article_title": a["title"],
             "article_url": a["url"],
-            "nlm_notebook_id": nlm_notebook_id or "",
         }
         for a in articles_data
     ]

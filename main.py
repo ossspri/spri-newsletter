@@ -23,7 +23,6 @@ from src.news_service import GNewsService
 from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
-from src.drive_service import DriveService
 from src.git_sync import GitSync, GitSyncError
 from src.industry_scan_service import (
     IndustryScanService, IndustryScanError, extract_article_urls,
@@ -162,26 +161,13 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
                 logger.error("Claude API 실패 - 기사 목록만 발송: %s", e)
                 markdown_body = _fallback_articles_markdown(articles)
 
-    # ── Step 6: Google 인증 + Drive 문서 생성 (이메일 링크 포함을 위해 선행) ──
+    # ── Step 6: Google 인증 (Gmail 발송용) ──
     creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
     token_path = str(BASE_DIR / "credentials" / "google_token.json")
     creds = get_google_credentials(creds_path, token_path)
 
-    drive_doc_id = None
-    drive_doc_url = ""
-    try:
-        drive = DriveService(creds)
-        folder_id = config.get("drive", {}).get("folder_id", "")
-        drive_doc_id = drive.create_document(
-            markdown_body, "daily", date_str, folder_id
-        )
-        drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
-        logger.info("Drive 문서 생성: %s", drive_doc_id)
-    except Exception as e:
-        logger.error("Drive 저장 실패 (파이프라인 계속): %s", e)
-
     # ── Step 7: 마크다운 → HTML 변환 ──
-    html_body = render_email_html(markdown_body, "daily", date_display, drive_doc_url)
+    html_body = render_email_html(markdown_body, "daily", date_display)
     subject = build_email_subject("daily", date_str)
 
     # ── Step 8: Gmail API 발송 ──
@@ -197,7 +183,6 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
         logger.error(error_msg)
 
     # ── Step 9: 발송 이력 기록 ──
-    nlm_notebook = None  # Daily는 NotebookLM 저장 생략 (Weekly 발간 시 저장)
     log_newsletter(
         db_conn,
         "daily",
@@ -205,8 +190,6 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
         len(recipients),
         send_status,
         error_message=error_msg,
-        drive_doc_id=drive_doc_id,
-        nlm_notebook=nlm_notebook,
     )
 
     # ── Step 11: 로컬 백업 ──
@@ -221,8 +204,7 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
         if archive_rows:
             logger.info("A' 본문에서 인용 URL %d건 추출 → archive", len(archive_rows))
     if archive_rows:
-        archive_articles(db_conn, date_str, "daily", archive_rows,
-                         nlm_notebook_id=nlm_notebook)
+        archive_articles(db_conn, date_str, "daily", archive_rows)
 
     # P0(2026-05-13): 발행 결과물(.md, .csv) git 자동 commit + push.
     # push 실패는 warn만 (commit은 보존, 다음 실행에서 재전송).
