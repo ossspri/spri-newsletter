@@ -11,3 +11,4 @@ id,sent_at,type,article_count,recipient_count,status,error_message,drive_doc_id,
 error: Please commit or stash them."
 202605150800057486,2026-05-15T08:00:05,daily,0,0,failed,"git_sync pull 실패: git pull --rebase 실패 (충돌 가능, 발송 차단): error: cannot pull with rebase: You have unstaged changes.
 error: Please commit or stash them."
+202605150828172711,2026-05-15T08:28:17,daily,0,7,success,
