@@ -113,6 +113,20 @@ features:
   git_autosync: true
   # 실제 git 명령 없이 로그만 (배포 전 검증용).
   git_autosync_dry_run: false
+  # Daily 뉴스레터 본문 생성 모드 (2026-05-14 Phase 1 A→A' 교체).
+  # "industry_scan" — A'(prism 4-Pass + 후처리, ~5-8분, 30+회 Claude 호출)
+  # "gnews"        — A(GNews 25건 + claude.generate_daily, 빠르고 단순)
+  news_mode: "industry_scan"
+  # news_mode가 "industry_scan"인데 A'이 실패할 때 GNews로 자동 폴백할지.
+  # 운영 안정성 우선 시 true 권장 (오늘 발송 스킵하지 않음).
+  news_mode_fallback_on_failure: true
+
+# ── A'(industry-scan) 설정 ──
+industry_scan:
+  # Claude tool_use 루프 최대 횟수 (4-Pass는 보통 20~30회).
+  max_iter: 35
+  # null이면 prism repo의 기본 SKILL.md 경로(`prism/skills/industry-scan.md`).
+  skill_path: null
 
 # ── 로깅 ──
 logging:

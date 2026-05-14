@@ -25,6 +25,9 @@ from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
 from src.drive_service import DriveService
 from src.git_sync import GitSync, GitSyncError
+from src.industry_scan_service import (
+    IndustryScanService, IndustryScanError, extract_article_urls,
+)
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -97,40 +100,67 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     date_display = get_kst_display_date()
     recipients = config.get("recipients", {}).get("daily", [])
 
-    # ── Step 2: GNews API 뉴스 수집 ──
-    gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
-    gnews = GNewsService(config, gnews_api_key)
+    # 2026-05-14 Phase 1: A → A' 통째 교체. news_mode flag로 분기.
+    news_mode = config.get("features", {}).get("news_mode", "industry_scan")
+    fallback_enabled = config.get("features", {}).get(
+        "news_mode_fallback_on_failure", True
+    )
 
-    try:
-        articles = gnews.fetch_articles()
-    except Exception as e:
-        logger.error("뉴스 수집 실패: %s", e)
-        log_newsletter(db_conn, "daily", 0, len(recipients), "failed",
-                       error_message=f"GNews 수집 실패: {e}")
-        return
+    articles: list[dict] = []
+    markdown_body: str = ""
 
-    # ── Step 3: Google Sheets 저장 ──
-    inserted = insert_daily_articles(db_conn, articles)
-    logger.info("DB 저장: %d건 삽입", inserted)
+    if news_mode == "industry_scan":
+        # ── A' (industry-scan) 본문 생성 ──
+        try:
+            scan = IndustryScanService(config)
+            markdown_body = scan.generate(date_str)
+            logger.info("A'(industry-scan) 본문 생성 성공 (%d자)",
+                        len(markdown_body))
+        except IndustryScanError as e:
+            if fallback_enabled:
+                logger.warning(
+                    "A' 실패 — GNews(A) fallback으로 전환: %s", e
+                )
+                news_mode = "gnews"
+            else:
+                logger.error(
+                    "A' 실패 + fallback 비활성 — 오늘 발송 스킵: %s", e
+                )
+                log_newsletter(db_conn, "daily", 0, len(recipients), "failed",
+                               error_message=f"A'(industry-scan) 실패: {e}")
+                return
 
-    # PRD 10: 기사 0건 수집 시 메시지 대체
-    if not articles:
-        logger.warning("수집된 기사 0건 - 대체 메시지로 발송")
-        markdown_body = "※ 해당 기간 주요 신규 동향 없음"
-    else:
-        # ── Step 4: 이전 뉴스레터 요약 조회 ──
-        existing_summaries = get_existing_summaries(db_conn)
-
-        # ── Step 5: Claude API → 마크다운 생성 ──
-        claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
-        claude = ClaudeService(config, claude_api_key)
+    if news_mode == "gnews":
+        # ── A (GNews) 본문 생성 — fallback 또는 명시적 선택 ──
+        gnews_api_key = os.environ.get("GNEWS_API_KEY", "")
+        gnews = GNewsService(config, gnews_api_key)
 
         try:
-            markdown_body = claude.generate_daily(articles, existing_summaries)
+            articles = gnews.fetch_articles()
         except Exception as e:
-            # PRD 10: Claude 실패 시 기사 목록만 발송
-            logger.error("Claude API 실패 - 기사 목록만 발송: %s", e)
-            markdown_body = _fallback_articles_markdown(articles)
+            logger.error("뉴스 수집 실패: %s", e)
+            log_newsletter(db_conn, "daily", 0, len(recipients), "failed",
+                           error_message=f"GNews 수집 실패: {e}")
+            return
+
+        inserted = insert_daily_articles(db_conn, articles)
+        logger.info("DB 저장: %d건 삽입", inserted)
+
+        # PRD 10: 기사 0건 수집 시 메시지 대체
+        if not articles:
+            logger.warning("수집된 기사 0건 - 대체 메시지로 발송")
+            markdown_body = "※ 해당 기간 주요 신규 동향 없음"
+        else:
+            existing_summaries = get_existing_summaries(db_conn)
+            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+            claude = ClaudeService(config, claude_api_key)
+
+            try:
+                markdown_body = claude.generate_daily(articles, existing_summaries)
+            except Exception as e:
+                # PRD 10: Claude 실패 시 기사 목록만 발송
+                logger.error("Claude API 실패 - 기사 목록만 발송: %s", e)
+                markdown_body = _fallback_articles_markdown(articles)
 
     # ── Step 6: Google 인증 + Drive 문서 생성 (이메일 링크 포함을 위해 선행) ──
     creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
@@ -183,9 +213,15 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     _save_local_backup(markdown_body, "daily", date_str)
 
     # 아카이브 기사 저장
+    # A 모드: GNews articles 리스트 사용. A' 모드: markdown 본문에서 URL 추출.
     if articles:
-        archive_articles(db_conn, date_str, "daily",
-                         [{"title": a["title"], "url": a["url"]} for a in articles],
+        archive_rows = [{"title": a["title"], "url": a["url"]} for a in articles]
+    else:
+        archive_rows = extract_article_urls(markdown_body)
+        if archive_rows:
+            logger.info("A' 본문에서 인용 URL %d건 추출 → archive", len(archive_rows))
+    if archive_rows:
+        archive_articles(db_conn, date_str, "daily", archive_rows,
                          nlm_notebook_id=nlm_notebook)
 
     # P0(2026-05-13): 발행 결과물(.md, .csv) git 자동 commit + push.

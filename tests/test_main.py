@@ -30,6 +30,9 @@ SAMPLE_CONFIG = {
         "weekly": ["director@spri.kr"],
     },
     "logging": {"level": "INFO", "file": "logs/spri.log"},
+    # Phase 1 (2026-05-14): 기존 GNews 흐름을 검증하므로 명시적으로 gnews 모드.
+    # 신규 industry_scan 모드는 TestIndustryScanMode에서 별도 검증.
+    "features": {"news_mode": "gnews"},
 }
 
 SAMPLE_ARTICLES = [
@@ -598,3 +601,159 @@ class TestDriveIntegration:
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
         mock_drive.create_document.assert_not_called()
+
+
+# ── Phase 1 (2026-05-14): A → A' news_mode 분기 ──
+
+
+SAMPLE_INDUSTRY_SCAN_CONFIG = {
+    **SAMPLE_CONFIG,
+    "features": {
+        "news_mode": "industry_scan",
+        "news_mode_fallback_on_failure": True,
+    },
+}
+
+SAMPLE_ASCAN_MARKDOWN = """\
+## 1. 개요
+
+**SW 산업 동향 — A' 본문**
+[Reuters](https://reuters.com/x) 외 다수.
+"""
+
+
+class TestIndustryScanMode:
+    """news_mode='industry_scan' 분기 (A' 운영 교체) 테스트."""
+
+    @patch("main.DriveService")
+    @patch("main.get_google_credentials")
+    @patch("main.GmailService")
+    @patch("main.IndustryScanService")
+    def test_a_prime_happy_path(
+        self, mock_scan_cls, mock_gmail_cls, mock_auth,
+        mock_drive_cls, db_conn
+    ):
+        """A' 성공 시 GNews 분기 진입 없이 발송까지."""
+        mock_scan = MagicMock()
+        mock_scan.generate.return_value = SAMPLE_ASCAN_MARKDOWN
+        mock_scan_cls.return_value = mock_scan
+
+        mock_gmail = MagicMock()
+        mock_gmail_cls.return_value = mock_gmail
+        mock_auth.return_value = MagicMock()
+        mock_drive_cls.return_value = MagicMock()
+
+        with patch("main._save_local_backup"), \
+             patch("main.GNewsService") as mock_gnews_cls, \
+             patch("main.ClaudeService") as mock_claude_cls:
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
+            mock_gnews_cls.assert_not_called()
+            mock_claude_cls.assert_not_called()
+
+        mock_scan.generate.assert_called_once()
+        mock_gmail.send_email.assert_called_once()
+
+    @patch("main.DriveService")
+    @patch("main.get_google_credentials")
+    @patch("main.GmailService")
+    @patch("main.ClaudeService")
+    @patch("main.GNewsService")
+    @patch("main.IndustryScanService")
+    @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
+    def test_a_prime_failure_falls_back_to_gnews(
+        self, mock_scan_cls, mock_gnews_cls, mock_claude_cls,
+        mock_gmail_cls, mock_auth, mock_drive_cls, db_conn
+    ):
+        """A' 실패 + fallback=true 시 GNews 분기로 전환."""
+        from src.industry_scan_service import IndustryScanError
+
+        mock_scan = MagicMock()
+        mock_scan.generate.side_effect = IndustryScanError("MCP 연결 실패")
+        mock_scan_cls.return_value = mock_scan
+
+        mock_gnews = MagicMock()
+        mock_gnews.fetch_articles.return_value = SAMPLE_ARTICLES
+        mock_gnews_cls.return_value = mock_gnews
+
+        mock_claude = MagicMock()
+        mock_claude.generate_daily.return_value = SAMPLE_MARKDOWN
+        mock_claude_cls.return_value = mock_claude
+
+        mock_gmail = MagicMock()
+        mock_gmail_cls.return_value = mock_gmail
+        mock_auth.return_value = MagicMock()
+        mock_drive_cls.return_value = MagicMock()
+
+        with patch("main._save_local_backup"):
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
+
+        mock_scan.generate.assert_called_once()
+        mock_gnews.fetch_articles.assert_called_once()
+        mock_claude.generate_daily.assert_called_once()
+        mock_gmail.send_email.assert_called_once()
+
+    @patch("main.DriveService")
+    @patch("main.get_google_credentials")
+    @patch("main.GmailService")
+    @patch("main.GNewsService")
+    @patch("main.IndustryScanService")
+    def test_a_prime_failure_no_fallback_skips_send(
+        self, mock_scan_cls, mock_gnews_cls, mock_gmail_cls, mock_auth,
+        mock_drive_cls, db_conn
+    ):
+        """A' 실패 + fallback=false 시 발송 스킵, GNews 진입 안 함."""
+        from src.industry_scan_service import IndustryScanError
+
+        cfg = {
+            **SAMPLE_CONFIG,
+            "features": {
+                "news_mode": "industry_scan",
+                "news_mode_fallback_on_failure": False,
+            },
+        }
+        mock_scan = MagicMock()
+        mock_scan.generate.side_effect = IndustryScanError("max_iter 도달")
+        mock_scan_cls.return_value = mock_scan
+
+        mock_gmail = MagicMock()
+        mock_gmail_cls.return_value = mock_gmail
+
+        with patch("main._save_local_backup"):
+            run_daily_pipeline(cfg, db_conn)
+
+        mock_gmail.send_email.assert_not_called()
+        mock_gnews_cls.assert_not_called()
+
+    @patch("main.DriveService")
+    @patch("main.get_google_credentials")
+    @patch("main.GmailService")
+    @patch("main.IndustryScanService")
+    def test_a_prime_archive_extracts_urls(
+        self, mock_scan_cls, mock_gmail_cls, mock_auth,
+        mock_drive_cls, db_conn
+    ):
+        """A' 모드에서 본문 마크다운 인용 URL이 archive_articles로 전달되는지."""
+        markdown = (
+            "## 1. 개요\n\n"
+            "[Reuters 보도](https://reuters.com/a) 외 "
+            "[Bloomberg](https://bloomberg.com/b) 참고.\n"
+        )
+        mock_scan = MagicMock()
+        mock_scan.generate.return_value = markdown
+        mock_scan_cls.return_value = mock_scan
+
+        mock_gmail_cls.return_value = MagicMock()
+        mock_auth.return_value = MagicMock()
+        mock_drive_cls.return_value = MagicMock()
+
+        with patch("main._save_local_backup"), \
+             patch("main.archive_articles") as mock_archive:
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
+
+        mock_archive.assert_called_once()
+        # 4번째 positional 인자가 archive_rows
+        call_args = mock_archive.call_args
+        rows = call_args.args[3] if len(call_args.args) > 3 else call_args.kwargs.get("articles_list")
+        urls = {r["url"] for r in rows}
+        assert "https://reuters.com/a" in urls
+        assert "https://bloomberg.com/b" in urls

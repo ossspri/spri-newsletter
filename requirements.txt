@@ -1,5 +1,6 @@
 # AI
 anthropic>=0.40.0
+mcp>=1.0.0  # Industry-scan (A') prism-data MCP stdio client
 
 # Google APIs (Gmail/Drive 발송 및 Drive 아카이브용)
 google-api-python-client>=2.100.0
