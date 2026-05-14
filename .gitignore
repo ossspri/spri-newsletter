@@ -3,6 +3,9 @@
 venv/
 .venv/
 
+# Claude Code 메타데이터 (settings·worktrees 등 — 런타임에 자동 갱신되므로 git 추적 안 함)
+.claude/
+
 # Credentials
 credentials/
 
