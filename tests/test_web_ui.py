@@ -248,7 +248,7 @@ class TestWeeklyPage:
 
 
 class TestWeeklyAddArticle:
-    """POST /weekly/add-article 수동 기사 추가 테스트."""
+    """POST /focus/add-article 수동 기사 추가 테스트."""
 
     @patch("web_ui.app.extract_url_metadata")
     def test_add_article_success(self, mock_extract, client):
@@ -259,7 +259,7 @@ class TestWeeklyAddArticle:
         }
 
         resp = client.post(
-            "/weekly/add-article",
+            "/focus/add-article",
             data=json.dumps({"url": "https://example.com/manual"}),
             content_type="application/json",
         )
@@ -271,7 +271,7 @@ class TestWeeklyAddArticle:
     def test_add_article_missing_url(self, client):
         """URL 없이 요청하면 에러를 반환한다."""
         resp = client.post(
-            "/weekly/add-article",
+            "/focus/add-article",
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -325,11 +325,10 @@ class TestWeeklyGenerate:
     def test_generate_passes_reports_to_claude(
         self, mock_get_report, mock_claude_cls, client
     ):
-        """PR3: 선택된 reports를 풀스펙으로 조회해 claude.generate_weekly에 전달."""
+        """PR3: Focus 라우트가 reports를 풀스펙으로 조회해 claude.generate_focus에 전달."""
         mock_claude = MagicMock()
-        mock_claude.generate_weekly.return_value = "## 1. 개요\nBody."
+        mock_claude.generate_focus.return_value = "## 1. 개요\nBody."
         mock_claude_cls.return_value = mock_claude
-        # 가짜 보고서 반환 (text_path 없음 → excerpt 빈 값)
         mock_get_report.return_value = {
             "id": "20260512123456",
             "title": "IBM AI Index",
@@ -340,7 +339,7 @@ class TestWeeklyGenerate:
         }
 
         resp = client.post(
-            "/weekly/generate",
+            "/focus/generate",
             data=json.dumps({
                 "articles": SAMPLE_ARTICLES,
                 "reports": [{"id": "report-20260512123456", "title": "IBM AI Index"}],
@@ -348,12 +347,8 @@ class TestWeeklyGenerate:
             content_type="application/json",
         )
         assert resp.status_code == 200
-        mock_get_report.assert_called_once_with(
-            mock_claude_cls.call_args, "20260512123456",
-        ) if False else None  # 호출 자체만 검증
         mock_get_report.assert_called_once()
-        # claude.generate_weekly가 reports kw로 호출됐는지
-        call_kwargs = mock_claude.generate_weekly.call_args.kwargs
+        call_kwargs = mock_claude.generate_focus.call_args.kwargs
         assert "reports" in call_kwargs
         assert call_kwargs["reports"] is not None
         assert call_kwargs["reports"][0]["title"] == "IBM AI Index"
@@ -361,25 +356,24 @@ class TestWeeklyGenerate:
     @patch("web_ui.app.ClaudeService")
     @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
     def test_generate_with_reports_only_no_articles(self, mock_claude_cls, client):
-        """기사 없이 보고서만 선택해도 진행 가능 (PR3)."""
+        """기사 없이 보고서만 선택해도 진행 가능 (Focus 라우트)."""
         with patch("web_ui.app.get_manual_report") as mock_get:
             mock_get.return_value = {
                 "id": "r1", "title": "T", "url": "", "summary": "S",
                 "text_path": "", "original_filename": "",
             }
             mock_claude = MagicMock()
-            mock_claude.generate_weekly.return_value = "OK"
+            mock_claude.generate_focus.return_value = "OK"
             mock_claude_cls.return_value = mock_claude
 
             resp = client.post(
-                "/weekly/generate",
+                "/focus/generate",
                 data=json.dumps({
                     "articles": [],
                     "reports": [{"id": "report-r1", "title": "T"}],
                 }),
                 content_type="application/json",
             )
-            # 기사 없이 보고서만 있으면 200 (구현이 둘 다 비어있을 때만 400 반환)
             assert resp.status_code == 200
 
 
@@ -467,11 +461,11 @@ class TestPreviewEndpoint:
 
 
 class TestWeeklyAddReport:
-    """POST /weekly/add-report — URL 또는 PDF 첨부."""
+    """POST /focus/add-report — URL 또는 PDF 첨부."""
 
     def test_missing_both_inputs_returns_400(self, client):
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={},
             content_type="multipart/form-data",
         )
@@ -482,7 +476,7 @@ class TestWeeklyAddReport:
     @patch("web_ui.app.is_safe_url", return_value=False)
     def test_unsafe_url_returns_400(self, mock_safe, client):
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={"url": "http://127.0.0.1/admin"},
             content_type="multipart/form-data",
         )
@@ -504,7 +498,7 @@ class TestWeeklyAddReport:
         }
 
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={"url": "https://example.com/ibm-ai-index"},
             content_type="multipart/form-data",
         )
@@ -537,7 +531,7 @@ class TestWeeklyAddReport:
         mock_claude_cls.return_value = mock_claude
 
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={"url": "https://example.com/report.pdf"},
             content_type="multipart/form-data",
         )
@@ -566,7 +560,7 @@ class TestWeeklyAddReport:
         pdf_bytes = b"%PDF-1.4\n" + b"x" * 1024
         with patch("web_ui.app.MANUAL_REPORTS_DIR", tmp_path):
             resp = client.post(
-                "/weekly/add-report",
+                "/focus/add-report",
                 data={
                     "file": (io.BytesIO(pdf_bytes), "ibm_ai_index_2026.pdf"),
                 },
@@ -584,7 +578,7 @@ class TestWeeklyAddReport:
 
     def test_non_pdf_upload_rejected(self, client):
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={
                 "file": (io.BytesIO(b"not a pdf"), "fake.pdf"),
             },
@@ -596,7 +590,7 @@ class TestWeeklyAddReport:
 
     def test_wrong_extension_rejected(self, client):
         resp = client.post(
-            "/weekly/add-report",
+            "/focus/add-report",
             data={
                 "file": (io.BytesIO(b"%PDF-anything"), "evil.exe"),
             },

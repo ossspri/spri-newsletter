@@ -13,6 +13,7 @@
       <nav class="tabs">
         <a href="{{ url_for('daily_page') }}" class="tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
         <a href="{{ url_for('weekly_page') }}" class="tab {% if active_tab == 'weekly' %}active{% endif %}">Weekly</a>
+        <a href="{{ url_for('focus_page') }}" class="tab {% if active_tab == 'focus' %}active{% endif %}">Focus</a>
         <span id="nlm-badge" class="nlm-badge nlm-checking" title="NotebookLM 인증 확인 중...">NLM: 확인 중</span>
         <button class="btn-reset" onclick="resetToday()" title="오늘 생성된 아카이브와 백업 파일을 삭제합니다 (발송 이력은 보존)">오늘 생성된 기사 삭제</button>
       </nav>

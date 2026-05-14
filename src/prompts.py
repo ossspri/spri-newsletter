@@ -74,26 +74,42 @@ ETH Zurich 연구진이 Adobe가 주도하는 C2PA 소프트웨어의 해킹 가
     )
 
 
-def build_weekly_prompt(
+def build_weekly_prompt(article_list: str, existing_summaries: str) -> str:
+    """Weekly 표준 주간 보고서 prompt (자동 수집 daily 기사만 입력).
+
+    수동 입력(보고서·전문가 인사이트)과 1차 자료 활용은 ``build_focus_prompt``
+    가 담당. Weekly는 단순·표준 형태를 유지하기 위해 옛 시그니처로 복귀.
+
+    구현: ``build_focus_prompt(article_list, existing_summaries)`` 위임 —
+    동일 main template이지만 reports/insight 블록은 빈 상태로 prompt에서
+    자연스럽게 제외됨. 두 함수의 prompt 본문이 분기되지 않아 유지보수 단순.
+
+    Args:
+        article_list: 자동 수집된 daily 기사 7일치 목록
+        existing_summaries: 이전 뉴스레터에 포함된 기사 제목 (중복 배제용)
+    """
+    return build_focus_prompt(article_list, existing_summaries)
+
+
+def build_focus_prompt(
     article_list: str,
     existing_summaries: str,
     reports: list[dict] | None = None,
     expert_insight: str = "",
 ) -> str:
-    """Weekly 보고서 생성용 프롬프트를 조립한다.
+    """Focus 큐레이션 보고서 prompt — 자동 수집 + 수동 입력 통합.
+
+    Weekly 표준과 분리된 큐레이션 형태. 2026-05-15 Focus 분리 이전의
+    풍부한 build_weekly_prompt 본체를 그대로 이어 받는다.
 
     Args:
-        article_list: 전문가가 선별한 기사 목록
-        existing_summaries: 이전 뉴스레터에 포함된 기사 제목 목록 (중복 배제용)
-        reports: 수동 첨부 1차 자료(연구보고서/백서/회사 발표) dict list.
-            None 또는 빈 list면 ``<reports>`` 블록을 prompt에서 생략 — 기존
-            동작 보존. 있으면 별도 블록으로 주입하여 LLM이 "1차 자료"로
-            인식, 직접 인용을 우선하도록 가이드.
-        expert_insight: 전문가가 직접 입력한 금주 핵심 인사이트 텍스트.
-            비어있으면 기존 동작 (기사·보고서 자체에서 추출). 입력되면
-            ``<expert_insight>`` 블록을 prompt 상단에 주입하고, LLM이
-            이 인사이트와 관련 있는 기사·보고서를 식별해 해당 자료의 요약을
-            인사이트 맥락으로 증강하여 본문에 반영하도록 지시.
+        article_list: 자동 수집 기사 + 사용자 수동 추가 기사 목록 (혼합).
+        existing_summaries: 이전 뉴스레터에 포함된 기사 제목 (중복 배제용).
+        reports: 사용자가 수동 첨부한 1차 자료(연구보고서/백서/회사 발표).
+            None 또는 빈 list면 ``<reports>`` 블록 생략.
+        expert_insight: 사용자가 입력한 금주 핵심 인사이트. 비어있으면
+            기존 동작. 있으면 ``<expert_insight>`` 블록을 prompt 상단에
+            주입하고 LLM이 보고서 ① 개요에 첫 트렌드로 반영하도록 지시.
     """
     if reports:
         report_block = (

@@ -305,22 +305,27 @@ def create_app(config: dict, db_conn) -> Flask:
 
         return jsonify({"success": True, "results": results})
 
-    # ── Weekly 탭 ──
+    # ── Weekly 탭 (자동 수집 daily 기사만) ──
 
     @app.route("/weekly")
     def weekly_page():
+        """Weekly 표준 보고서 — 자동 수집 daily 기사 7일치만 선택해서 발간.
+
+        2026-05-15 분리: 수동 기사·보고서·전문가 인사이트·편집 미리보기는
+        Focus 탭으로 이동. Weekly는 단순·표준 흐름 (5a62540 시점 형태).
+        """
         db = get_db()
         articles = get_weekly_articles(db, days=7)
-        # 수동 추가 기사
-        manual_articles = get_all_manual_articles(db)
-        # 수동 추가 보고서 (PR3)
-        manual_reports = get_all_manual_reports(db)
+        # 날짜별 그룹핑 (5a62540 패턴).
+        grouped: dict[str, list[dict]] = {}
+        for a in articles:
+            pub = str(a.get("published_at", ""))
+            date_key = pub[:10] if pub else "unknown"
+            grouped.setdefault(date_key, []).append(a)
         return render_template(
             "weekly.html",
-            weekly_articles=articles,  # 출처 그룹 없이 단일 list (1.3 수정)
-            manual_articles=manual_articles,
-            manual_reports=manual_reports,
-            total_count=len(articles) + len(manual_articles),
+            grouped_articles=grouped,
+            total_count=len(articles),
         )
 
     @app.route("/weekly/translate-articles", methods=["POST"])
@@ -340,8 +345,198 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("기사 번역 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/weekly/add-article", methods=["POST"])
-    def weekly_add_article():
+    @app.route("/weekly/generate", methods=["POST"])
+    def weekly_generate():
+        """Claude API로 Weekly 표준 보고서를 생성한다 (자동 수집 기사만)."""
+        data = request.get_json() or {}
+        articles = data.get("articles", [])
+
+        if not articles:
+            return jsonify({
+                "success": False,
+                "error": "선택된 기사가 없습니다.",
+            }), 400
+
+        try:
+            db = get_db()
+            existing_summaries = get_existing_summaries(db)
+
+            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+            claude = ClaudeService(get_cfg(), claude_api_key)
+            markdown = claude.generate_weekly(articles, existing_summaries)
+
+            date_display = get_kst_display_date()
+            html_preview = render_email_html(markdown, "weekly", date_display)
+
+            return jsonify({
+                "success": True,
+                "markdown": markdown,
+                "html_preview": html_preview,
+            })
+        except Exception as e:
+            logger.error("주간 보고서 생성 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/weekly/publish", methods=["POST"])
+    def weekly_publish():
+        """Weekly 표준 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
+
+        2026-05-15 분리: ``edited_html`` 옵션은 Focus 라우트로 이동.
+        Weekly는 markdown → render_email_html 표준 흐름만.
+        """
+        data = request.get_json() or {}
+        markdown = data.get("markdown", "")
+        if not markdown:
+            return jsonify({"success": False, "error": "마크다운 내용이 없습니다."}), 400
+
+        cfg = get_cfg()
+        db = get_db()
+        date_str = get_kst_date_str()
+        date_display = get_kst_display_date()
+        creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
+        token_path = str(BASE_DIR / "credentials" / "google_token.json")
+        results = {"email": None, "drive": None, "notebooklm": None,
+                   "backup": None, "git_sync": None}
+
+        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
+        git_sync = GitSync(BASE_DIR, cfg)
+        try:
+            git_sync.pull_or_fail()
+        except GitSyncError as e:
+            logger.error("git_sync pull 실패 — Weekly 발송 차단: %s", e)
+            return jsonify({
+                "success": False,
+                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
+            }), 409
+
+        # ── Step 3: Google Drive 저장 (이메일 링크 포함을 위해 선행) ──
+        # 주의: Drive에는 markdown을 저장 (편집된 HTML이 아님 — Drive Doc은 마크다운
+        # 변환 기반). 편집된 HTML은 이메일에만 적용됨.
+        drive_doc_id = None
+        drive_doc_url = ""
+        try:
+            folder_id = cfg.get("drive", {}).get("folder_id", "")
+            creds = get_google_credentials(creds_path, token_path)
+            drive = DriveService(creds)
+            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
+            drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
+            results["drive"] = {"success": True, "doc_id": drive_doc_id}
+            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
+        except Exception as e:
+            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
+            results["drive"] = {"success": False, "error": str(e)}
+
+        # ── Step 4: Gmail 발송 ──
+        try:
+            recipients = cfg.get("recipients", {}).get("weekly", [])
+            html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
+            subject = build_email_subject("weekly", date_str)
+
+            creds = get_google_credentials(creds_path, token_path)
+            gmail = GmailService(creds)
+            gmail.send_email(recipients, subject, html_body)
+            results["email"] = {"success": True, "recipients": len(recipients)}
+            logger.info("주간 이메일 발송 완료 (%d명)", len(recipients))
+        except Exception as e:
+            logger.error("주간 이메일 발송 실패: %s", e)
+            log_newsletter(db, "weekly", 0, 0, "failed", error_message=str(e))
+            return jsonify({
+                "success": False,
+                "error": f"이메일 발송 실패: {e}",
+                "results": results,
+            }), 500
+
+        # ── Step 5: NotebookLM 저장 + 로컬 백업 (사전 인증 체크) ──
+        nlm_notebook = None
+        auth_status = check_nlm_auth()
+        if not auth_status["valid"]:
+            logger.warning("NotebookLM 인증 만료, 건너뜀: %s", auth_status["reason"])
+            results["notebooklm"] = {"success": False, "error": auth_status["reason"],
+                                     "skipped": True}
+        else:
+            try:
+                articles = get_weekly_articles(db, days=7)
+                if articles:
+                    nlm = NotebookLMService(cfg)
+                    nlm_notebook = nlm.save_sources(
+                        date_str,
+                        [{"title": a["title"], "url": a["url"]} for a in articles],
+                        markdown,
+                    )
+                    results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
+                    logger.info("Weekly NotebookLM 저장 완료: %s", nlm_notebook)
+                else:
+                    results["notebooklm"] = {"success": True, "notebook_id": None}
+                    logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
+            except Exception as e:
+                logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
+                results["notebooklm"] = {"success": False, "error": str(e)}
+
+        # 로컬 마크다운 백업
+        try:
+            backup_dir = BASE_DIR / "data" / "newsletters"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            filepath = backup_dir / f"weekly_{date_str}.md"
+            filepath.write_text(markdown, encoding="utf-8")
+            results["backup"] = {"success": True, "path": str(filepath)}
+            logger.info("Weekly 로컬 백업 저장: %s", filepath)
+        except Exception as e:
+            logger.error("Weekly 로컬 백업 실패 (계속 진행): %s", e)
+            results["backup"] = {"success": False, "error": str(e)}
+
+        # ── 발송 이력 기록 ──
+        log_newsletter(
+            db, "weekly", 0, len(recipients), "success",
+            drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
+        )
+
+        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
+        try:
+            results["git_sync"] = git_sync.commit_and_push("weekly", date_str)
+        except Exception as e:
+            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
+            results["git_sync"] = {"committed": False, "pushed": False,
+                                   "skipped": "exception", "error": str(e)}
+
+        return jsonify({"success": True, "results": results})
+
+    # ── Focus 탭 ──
+
+    @app.route("/focus")
+    def focus_page():
+        db = get_db()
+        articles = get_weekly_articles(db, days=7)
+        # 수동 추가 기사
+        manual_articles = get_all_manual_articles(db)
+        # 수동 추가 보고서 (PR3)
+        manual_reports = get_all_manual_reports(db)
+        return render_template(
+            "focus.html",
+            weekly_articles=articles,  # 출처 그룹 없이 단일 list (1.3 수정)
+            manual_articles=manual_articles,
+            manual_reports=manual_reports,
+            total_count=len(articles) + len(manual_articles),
+        )
+
+    @app.route("/focus/translate-articles", methods=["POST"])
+    def focus_translate_articles():
+        """선택된 기사의 제목/설명을 한국어로 번역한다."""
+        data = request.get_json() or {}
+        articles = data.get("articles", [])
+        if not articles:
+            return jsonify({"success": False, "error": "번역할 기사가 없습니다."}), 400
+
+        try:
+            claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
+            claude = ClaudeService(get_cfg(), claude_api_key)
+            translated = claude.translate_articles(articles)
+            return jsonify({"success": True, "articles": translated})
+        except Exception as e:
+            logger.error("기사 번역 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/focus/add-article", methods=["POST"])
+    def focus_add_article():
         """수동 기사를 추가한다 (URL → 자동 메타 추출)."""
         data = request.get_json() or {}
         url = data.get("url", "").strip()
@@ -361,8 +556,8 @@ def create_app(config: dict, db_conn) -> Flask:
             "article": {"title": title, "url": url, "description": description},
         })
 
-    @app.route("/weekly/add-report", methods=["POST"])
-    def weekly_add_report():
+    @app.route("/focus/add-report", methods=["POST"])
+    def focus_add_report():
         """수동 보고서를 추가한다.
 
         두 가지 입력 형태:
@@ -516,9 +711,9 @@ def create_app(config: dict, db_conn) -> Flask:
             "error": "파일이 너무 큽니다 (50MB 한도).",
         }), 413
 
-    @app.route("/weekly/generate", methods=["POST"])
-    def weekly_generate():
-        """Claude API로 Weekly 보고서를 생성한다.
+    @app.route("/focus/generate", methods=["POST"])
+    def focus_generate():
+        """Claude API로 Focus 보고서를 생성한다.
 
         PR3: ``reports`` 배열을 받아 선택된 보고서를 DB에서 조회 →
         Claude prompt에 ``<reports>`` 블록으로 주입.
@@ -563,14 +758,14 @@ def create_app(config: dict, db_conn) -> Flask:
 
             claude_api_key = os.environ.get("CLAUDE_API_KEY", "")
             claude = ClaudeService(get_cfg(), claude_api_key)
-            markdown = claude.generate_weekly(
+            markdown = claude.generate_focus(
                 articles, existing_summaries,
                 reports=selected_reports or None,
                 expert_insight=expert_insight,
             )
 
             date_display = get_kst_display_date()
-            html_preview = render_email_html(markdown, "weekly", date_display)
+            html_preview = render_email_html(markdown, "focus", date_display)
 
             return jsonify({
                 "success": True,
@@ -581,9 +776,9 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("주간 보고서 생성 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/weekly/publish", methods=["POST"])
-    def weekly_publish():
-        """Weekly 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
+    @app.route("/focus/publish", methods=["POST"])
+    def focus_publish():
+        """Focus 보고서를 발간한다 (이메일 발송 → Drive 저장 → NotebookLM → 로컬 백업).
 
         2-2: ``edited_html``이 있으면 사용자가 미리보기에서 직접 편집한 HTML을
         그대로 이메일에 사용. 없으면 ``markdown``을 ``render_email_html``로
@@ -609,7 +804,7 @@ def create_app(config: dict, db_conn) -> Flask:
         try:
             git_sync.pull_or_fail()
         except GitSyncError as e:
-            logger.error("git_sync pull 실패 — Weekly 발송 차단: %s", e)
+            logger.error("git_sync pull 실패 — Focus 발송 차단: %s", e)
             return jsonify({
                 "success": False,
                 "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
@@ -624,34 +819,34 @@ def create_app(config: dict, db_conn) -> Flask:
             folder_id = cfg.get("drive", {}).get("folder_id", "")
             creds = get_google_credentials(creds_path, token_path)
             drive = DriveService(creds)
-            drive_doc_id = drive.create_document(markdown, "weekly", date_str, folder_id)
+            drive_doc_id = drive.create_document(markdown, "focus", date_str, folder_id)
             drive_doc_url = f"https://docs.google.com/document/d/{drive_doc_id}/edit"
             results["drive"] = {"success": True, "doc_id": drive_doc_id}
-            logger.info("Weekly Drive 저장 완료: %s", drive_doc_id)
+            logger.info("Focus Drive 저장 완료: %s", drive_doc_id)
         except Exception as e:
-            logger.error("Weekly Drive 저장 실패 (계속 진행): %s", e)
+            logger.error("Focus Drive 저장 실패 (계속 진행): %s", e)
             results["drive"] = {"success": False, "error": str(e)}
 
         # ── Step 4: Gmail 발송 ──
         try:
-            recipients = cfg.get("recipients", {}).get("weekly", [])
+            recipients = cfg.get("recipients", {}).get("focus", [])
             if edited_html:
                 # 사용자가 미리보기 편집 → 그 HTML을 그대로 발송 (Drive 링크 갱신만 시도)
                 html_body = edited_html
-                logger.info("Weekly 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
+                logger.info("Focus 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
             else:
-                html_body = render_email_html(markdown, "weekly", date_display, drive_doc_url)
-                logger.info("Weekly 발송: markdown→HTML 렌더 사용")
-            subject = build_email_subject("weekly", date_str)
+                html_body = render_email_html(markdown, "focus", date_display, drive_doc_url)
+                logger.info("Focus 발송: markdown→HTML 렌더 사용")
+            subject = build_email_subject("focus", date_str)
 
             creds = get_google_credentials(creds_path, token_path)
             gmail = GmailService(creds)
             gmail.send_email(recipients, subject, html_body)
             results["email"] = {"success": True, "recipients": len(recipients)}
-            logger.info("주간 이메일 발송 완료 (%d명)", len(recipients))
+            logger.info("Focus 이메일 발송 완료 (%d명)", len(recipients))
         except Exception as e:
-            logger.error("주간 이메일 발송 실패: %s", e)
-            log_newsletter(db, "weekly", 0, 0, "failed", error_message=str(e))
+            logger.error("Focus 이메일 발송 실패: %s", e)
+            log_newsletter(db, "focus", 0, 0, "failed", error_message=str(e))
             return jsonify({
                 "success": False,
                 "error": f"이메일 발송 실패: {e}",
@@ -678,36 +873,36 @@ def create_app(config: dict, db_conn) -> Flask:
                         markdown,
                     )
                     results["notebooklm"] = {"success": True, "notebook_id": nlm_notebook}
-                    logger.info("Weekly NotebookLM 저장 완료: %s (수동 %d건 포함)",
+                    logger.info("Focus NotebookLM 저장 완료: %s (수동 %d건 포함)",
                                 nlm_notebook, len(manual))
                 else:
                     results["notebooklm"] = {"success": True, "notebook_id": None}
-                    logger.info("Weekly NotebookLM 건너뜀: 기사 없음")
+                    logger.info("Focus NotebookLM 건너뜀: 기사 없음")
             except Exception as e:
-                logger.error("Weekly NotebookLM 저장 실패 (계속 진행): %s", e)
+                logger.error("Focus NotebookLM 저장 실패 (계속 진행): %s", e)
                 results["notebooklm"] = {"success": False, "error": str(e)}
 
         # 로컬 마크다운 백업
         try:
             backup_dir = BASE_DIR / "data" / "newsletters"
             backup_dir.mkdir(parents=True, exist_ok=True)
-            filepath = backup_dir / f"weekly_{date_str}.md"
+            filepath = backup_dir / f"focus_{date_str}.md"
             filepath.write_text(markdown, encoding="utf-8")
             results["backup"] = {"success": True, "path": str(filepath)}
-            logger.info("Weekly 로컬 백업 저장: %s", filepath)
+            logger.info("Focus 로컬 백업 저장: %s", filepath)
         except Exception as e:
-            logger.error("Weekly 로컬 백업 실패 (계속 진행): %s", e)
+            logger.error("Focus 로컬 백업 실패 (계속 진행): %s", e)
             results["backup"] = {"success": False, "error": str(e)}
 
         # ── 발송 이력 기록 ──
         log_newsletter(
-            db, "weekly", 0, len(recipients), "success",
+            db, "focus", 0, len(recipients), "success",
             drive_doc_id=drive_doc_id, nlm_notebook=nlm_notebook,
         )
 
         # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
         try:
-            results["git_sync"] = git_sync.commit_and_push("weekly", date_str)
+            results["git_sync"] = git_sync.commit_and_push("focus", date_str)
         except Exception as e:
             logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
             results["git_sync"] = {"committed": False, "pushed": False,

@@ -12,6 +12,7 @@ import anthropic
 from src.prompts import (
     build_daily_prompt,
     build_weekly_prompt,
+    build_focus_prompt,
     format_articles_for_prompt,
 )
 from src.utils import retry
@@ -49,35 +50,60 @@ class ClaudeService:
         self,
         articles: list[dict],
         existing_summaries: str = "",
+    ) -> str:
+        """Weekly 표준 주간 보고서 마크다운을 생성한다.
+
+        2026-05-15 Focus 분리: 수동 보고서·전문가 인사이트는 ``generate_focus``
+        가 담당. Weekly는 자동 수집 기사만 사용하는 단순 모드.
+
+        Args:
+            articles: 자동 수집된 daily 기사 7일치 list.
+            existing_summaries: 과거 발송 기사 제목 (중복 배제).
+        """
+        article_text = format_articles_for_prompt(articles)
+        prompt = build_weekly_prompt(article_text, existing_summaries)
+
+        logger.info(
+            "Weekly 보고서 생성 시작 (기사 %d건, 모델: %s)",
+            len(articles), self.model,
+        )
+        raw = self._call_api(prompt)
+        result = self._postprocess(raw)
+        logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
+        return result
+
+    def generate_focus(
+        self,
+        articles: list[dict],
+        existing_summaries: str = "",
         reports: list[dict] | None = None,
         expert_insight: str = "",
     ) -> str:
-        """Weekly 보고서 마크다운을 생성한다.
+        """Focus 큐레이션 보고서 마크다운을 생성한다.
 
         Args:
-            articles: 선별된 기사 list.
+            articles: 자동 수집 기사 + 수동 추가 기사 혼합 list.
             existing_summaries: 과거 발송 기사 제목 (중복 배제).
-            reports: 수동 첨부 1차 자료 (PR3). None/빈 list면 기존 동작.
-                안전 한도: 상위 5건까지만 prompt에 주입 (체크박스로 더
-                선택해도 토큰 폭증 방지).
-            expert_insight: 전문가가 직접 입력한 금주 핵심 인사이트.
-                LLM이 이를 반영하여 관련 기사·보고서 요약을 증강.
+            reports: 수동 첨부 1차 자료. None/빈 list면 기존 동작.
+                안전 한도: 상위 5건까지만 prompt에 주입 (토큰 폭증 방지).
+            expert_insight: 사용자가 입력한 금주 핵심 인사이트.
+                LLM이 이를 반영해 관련 기사·보고서 요약을 증강.
         """
         article_text = format_articles_for_prompt(articles)
         trimmed_reports = (reports or [])[:5]
-        prompt = build_weekly_prompt(
+        prompt = build_focus_prompt(
             article_text, existing_summaries,
             reports=trimmed_reports or None,
             expert_insight=expert_insight or "",
         )
 
         logger.info(
-            "Weekly 보고서 생성 시작 (기사 %d건, 보고서 %d건, 인사이트 %d자, 모델: %s)",
+            "Focus 보고서 생성 시작 (기사 %d건, 보고서 %d건, 인사이트 %d자, 모델: %s)",
             len(articles), len(trimmed_reports), len(expert_insight or ""), self.model,
         )
         raw = self._call_api(prompt)
         result = self._postprocess(raw)
-        logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
+        logger.info("Focus 보고서 생성 완료 (%d자)", len(result))
         return result
 
     def summarize_report_text(

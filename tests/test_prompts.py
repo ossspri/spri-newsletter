@@ -3,6 +3,7 @@ import pytest
 
 from src.prompts import (
     build_daily_prompt,
+    build_focus_prompt,
     build_postprocess_prompt,
     build_weekly_prompt,
     format_articles_for_prompt,
@@ -255,10 +256,10 @@ class TestFormatReportsForPrompt:
         assert out.count("X") == 500
 
 
-class TestBuildWeeklyPromptWithReports:
+class TestBuildFocusPromptWithReports:
     def test_no_reports_preserves_legacy_output(self):
-        prompt_no = build_weekly_prompt("articles_text", "past")
-        prompt_none = build_weekly_prompt("articles_text", "past", reports=None)
+        prompt_no = build_focus_prompt("articles_text", "past")
+        prompt_none = build_focus_prompt("articles_text", "past", reports=None)
         # None과 인자 미지정은 동일
         assert prompt_no == prompt_none
         # 보고서 데이터 흔적이 없음
@@ -266,16 +267,16 @@ class TestBuildWeeklyPromptWithReports:
         assert "1차 자료(연구보고서/백서/회사 발표)입니다" not in prompt_no
 
     def test_with_reports_inserts_reports_block(self):
-        prompt = build_weekly_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        prompt = build_focus_prompt("articles", "past", reports=SAMPLE_REPORTS)
         assert "[보고서 1] IBM AI Index 2026" in prompt
         assert "76% of enterprises" in prompt
         assert "1차 자료(연구보고서/백서/회사 발표)입니다" in prompt
 
     def test_citation_format_guidance_present(self):
-        prompt = build_weekly_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        prompt = build_focus_prompt("articles", "past", reports=SAMPLE_REPORTS)
         # constraint #7 가이드 (literal {title}로 출력됨)
         assert "* 보고서: {title}" in prompt
 
     def test_articles_still_present(self):
-        prompt = build_weekly_prompt("ARTICLES_MARKER", "past", reports=SAMPLE_REPORTS)
+        prompt = build_focus_prompt("ARTICLES_MARKER", "past", reports=SAMPLE_REPORTS)
         assert "ARTICLES_MARKER" in prompt

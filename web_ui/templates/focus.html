@@ -1,0 +1,617 @@
+{% extends "base.html" %}
+{% set active_tab = "focus" %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Focus — 큐레이션 보고서</h2>
+</div>
+
+<!-- Step 1: 출처 선택 -->
+<section class="card">
+  <div class="card-header">
+    <h3>① 출처 선택</h3>
+    <div class="selection-controls">
+      <span id="selection-counter" class="counter">0/25 선택</span>
+      <button class="btn btn-small" onclick="selectAll()">전체 선택</button>
+      <button class="btn btn-small" onclick="deselectAll()">전체 해제</button>
+      <button id="btn-translate" class="btn btn-small btn-outline" onclick="translateArticles()">한국어 번역</button>
+    </div>
+  </div>
+
+  <div id="warning-25" class="alert alert-warning hidden">25건 초과 선택. 최대 25건까지 권장됩니다.</div>
+
+  <!-- Daily 수집 기사 — 전체를 하나의 +/- 토글로 접힘 (기본 접힘) -->
+  {% if weekly_articles %}
+  <div class="date-group source-group collapsed" data-source-group="daily-all">
+    <h4 class="date-label source-label" onclick="toggleSourceGroup(this)">
+      <span class="toggle-icon">+</span>
+      Daily 수집 기사
+      <span class="source-count">({{ weekly_articles|length }})</span>
+    </h4>
+    <div class="source-articles" style="display: none;">
+      {% for a in weekly_articles %}
+      <div class="article-item selectable">
+        <label class="checkbox-label">
+          <input type="checkbox" class="article-check"
+                 data-id="{{ a.id }}"
+                 data-title="{{ a.title }}"
+                 data-url="{{ a.url }}"
+                 data-description="{{ a.description }}"
+                 data-source="{{ a.source_name }}"
+                 data-original-title="{{ a.original_title or a.title }}"
+                 data-original-description="{{ a.original_description or a.description }}"
+                 onchange="updateCounter()">
+          <div class="article-info">
+            <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
+            <div class="article-meta">{{ a.source_name }} · {{ a.published_at[:10] }}</div>
+            <div class="article-desc">{{ a.description }}</div>
+          </div>
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 수동 기사 추가 (입력 폼이 위) -->
+  <div class="add-article-form">
+    <h4>수동 기사 추가</h4>
+    <div class="input-group">
+      <input type="url" id="manual-url" placeholder="https://..." class="input">
+      <button class="btn btn-secondary" onclick="addManualArticle()">추가</button>
+    </div>
+  </div>
+
+  <!-- 수동 추가 기사 디스플레이 (입력된 결과가 아래) -->
+  {% if manual_articles %}
+  <div class="date-group" id="manual-articles-group">
+    <h4 class="date-label">수동 추가 기사</h4>
+    {% for a in manual_articles %}
+    <div class="article-item selectable">
+      <label class="checkbox-label">
+        <input type="checkbox" class="article-check"
+               data-id="manual-{{ a.id }}"
+               data-title="{{ a.title }}"
+               data-url="{{ a.url }}"
+               data-description="{{ a.description }}"
+               data-source="수동 추가"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
+          <div class="article-desc">{{ a.description }}</div>
+        </div>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 수동 보고서 추가 폼 (입력 폼이 위) -->
+  <div class="add-article-form">
+    <h4>수동 보고서 추가</h4>
+    <div class="input-group">
+      <input type="url" id="manual-report-url" placeholder="보고서 URL (HTML 또는 PDF 직링크)" class="input">
+      <button class="btn btn-secondary" onclick="addManualReportFromUrl()">URL 추가</button>
+    </div>
+    <div class="input-group">
+      <input type="file" id="manual-report-file" accept="application/pdf">
+      <button class="btn btn-secondary" onclick="addManualReportFromFile()">PDF 업로드</button>
+    </div>
+  </div>
+
+  <!-- 수동 추가 보고서 디스플레이 (입력된 결과가 아래) -->
+  {% if manual_reports %}
+  <div class="date-group" id="manual-reports-group">
+    <h4 class="date-label">수동 추가 보고서</h4>
+    {% for r in manual_reports %}
+    <div class="article-item selectable">
+      <label class="checkbox-label">
+        <input type="checkbox" class="report-check"
+               data-id="report-{{ r.id }}"
+               data-title="{{ r.title }}"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title">📄 {{ r.title }}
+            {% if r.url %}<a href="{{ r.url }}" target="_blank">(원문)</a>{% endif %}
+          </div>
+          <div class="article-desc">{{ (r.summary or '')[:200] }}{% if (r.summary or '')|length > 200 %}…{% endif %}</div>
+        </div>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<!-- Step 2: 보고서 생성 -->
+<section class="card">
+  <div class="card-header">
+    <h3>② 주간 보고서 생성</h3>
+    <button id="btn-generate-weekly" class="btn btn-primary" onclick="generateWeekly()">보고서 생성</button>
+  </div>
+
+  <!-- 핵심 인사이트 입력 (2-1) -->
+  <div class="insight-input-section">
+    <label for="expert-insight">전문가 핵심 인사이트 (선택)</label>
+    <textarea id="expert-insight" class="insight-textarea"
+              placeholder="예: AI 보안 위협이 SW 산업의 보안 패러다임 전환을 강요하고 있다. 한국 기업들은 AI 기반 방어 체계 구축을 생존 조건으로 인식해야 한다."></textarea>
+    <div class="insight-hint">
+      입력 시 Claude가 이 인사이트를 ① 개요 섹션에 반영하고, 관련 기사·보고서의 요약을 인사이트 맥락으로 증강합니다. 비워두면 자료 자체에서 인사이트를 도출합니다.
+    </div>
+  </div>
+
+  <div id="weekly-editor-section" class="hidden">
+    <label for="weekly-markdown-editor">마크다운 편집:</label>
+    <textarea id="weekly-markdown-editor" class="editor" rows="20"></textarea>
+    <button class="btn btn-secondary" onclick="refreshWeeklyPreview()">미리보기 갱신</button>
+  </div>
+</section>
+
+<!-- Step 3: 미리보기 + 발간 -->
+<section class="card">
+  <div class="card-header">
+    <h3>③ 미리보기 및 발간</h3>
+    <div class="btn-group">
+      <button class="btn btn-secondary btn-small" onclick="resetPreviewToOriginal()" title="편집을 취소하고 ② 마크다운으로 다시 렌더링">미리보기 초기화</button>
+      <button id="btn-publish-weekly" class="btn btn-success" onclick="publishWeekly()" disabled>보고서 발간</button>
+    </div>
+  </div>
+  <div class="preview-editable-hint">✏️ 아래 미리보기를 직접 클릭하여 문구를 수정할 수 있습니다. 편집 내용은 발간 시 그대로 이메일로 발송됩니다.</div>
+  <div id="weekly-preview-container" class="preview-frame preview-editable" contenteditable="false">
+    <p class="empty-state">보고서를 생성하면 미리보기가 표시됩니다.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let weeklyMarkdown = '';
+
+  function getSelectedArticles() {
+    const checks = document.querySelectorAll('.article-check:checked');
+    return Array.from(checks).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.originalTitle || cb.dataset.title,
+      url: cb.dataset.url,
+      description: cb.dataset.originalDescription || cb.dataset.description,
+      source_name: cb.dataset.source,
+    }));
+  }
+
+  function getSelectedReports() {
+    const checks = document.querySelectorAll('.report-check:checked');
+    return Array.from(checks).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.title,
+    }));
+  }
+
+  function updateCounter() {
+    const articleCount = document.querySelectorAll('.article-check:checked').length;
+    const reportCount = document.querySelectorAll('.report-check:checked').length;
+    const counter = document.getElementById('selection-counter');
+    if (reportCount > 0) {
+      counter.textContent = `${articleCount}/25 기사 + ${reportCount} 보고서`;
+    } else {
+      counter.textContent = `${articleCount}/25 선택`;
+    }
+    const warning = document.getElementById('warning-25');
+    if (articleCount > 25) {
+      warning.classList.remove('hidden');
+    } else {
+      warning.classList.add('hidden');
+    }
+  }
+
+  function selectAll() {
+    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = true; });
+    updateCounter();
+  }
+
+  function deselectAll() {
+    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = false; });
+    updateCounter();
+  }
+
+  // ── Daily 수집 기사 단일 그룹 접힘/펼침 토글 (1.3) ──
+
+  function toggleSourceGroup(header) {
+    const group = header.closest('.source-group');
+    if (!group) return;
+    const articles = group.querySelector('.source-articles');
+    const icon = header.querySelector('.toggle-icon');
+    if (group.classList.contains('collapsed')) {
+      group.classList.remove('collapsed');
+      articles.style.display = '';
+      if (icon) icon.textContent = '−';  // U+2212 minus
+    } else {
+      group.classList.add('collapsed');
+      articles.style.display = 'none';
+      if (icon) icon.textContent = '+';
+    }
+  }
+
+  async function translateArticles() {
+    const checkboxes = document.querySelectorAll('.article-check');
+    if (checkboxes.length === 0) {
+      showToast('번역할 기사가 없습니다.', true);
+      return;
+    }
+    const articles = Array.from(checkboxes).map(cb => ({
+      id: cb.dataset.id,
+      title: cb.dataset.title,
+      url: cb.dataset.url,
+      description: cb.dataset.description,
+      source_name: cb.dataset.source,
+    }));
+    showLoading('기사 제목/설명을 한국어로 번역 중...');
+    try {
+      const data = await apiCall('/focus/translate-articles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articles }),
+      });
+      const translated = data.articles;
+      checkboxes.forEach((cb, i) => {
+        if (i < translated.length) {
+          const a = translated[i];
+          cb.dataset.originalTitle = cb.dataset.title;
+          cb.dataset.originalDescription = cb.dataset.description;
+          cb.dataset.title = a.title;
+          cb.dataset.description = a.description || '';
+          const info = cb.closest('.article-item').querySelector('.article-info');
+          const titleEl = info.querySelector('.article-title a');
+          const descEl = info.querySelector('.article-desc');
+          if (titleEl) titleEl.textContent = a.title;
+          if (descEl) descEl.textContent = a.description || '';
+        }
+      });
+      document.getElementById('btn-translate').textContent = '번역 완료 ✓';
+      document.getElementById('btn-translate').disabled = true;
+      showToast('한국어 번역 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function addManualArticle() {
+    const url = document.getElementById('manual-url').value.trim();
+    if (!url) return;
+    showLoading('URL 메타데이터를 추출 중...');
+    try {
+      const data = await apiCall('/focus/add-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const a = data.article;
+
+      // 수동 추가 기사 디스플레이 그룹이 없으면 폼 바로 뒤에 생성
+      let manualGroup = document.getElementById('manual-articles-group');
+      if (!manualGroup) {
+        manualGroup = document.createElement('div');
+        manualGroup.id = 'manual-articles-group';
+        manualGroup.className = 'date-group';
+        manualGroup.innerHTML = '<h4 class="date-label">수동 추가 기사</h4>';
+        // 수동 기사 추가 폼 (#manual-url 포함)의 부모 폼 바로 뒤에 삽입
+        const addForm = document.getElementById('manual-url').closest('.add-article-form');
+        addForm.insertAdjacentElement('afterend', manualGroup);
+      }
+
+      // 새 기사 항목을 DOM에 추가
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'article-item selectable';
+      const escapedTitle = a.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const escapedDesc = (a.description || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const escapedUrl = a.url.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      itemDiv.innerHTML = `
+        <label class="checkbox-label">
+          <input type="checkbox" class="article-check"
+                 data-id="manual-new-${Date.now()}"
+                 data-title="${escapedTitle}"
+                 data-url="${escapedUrl}"
+                 data-description="${escapedDesc}"
+                 data-source="수동 추가"
+                 onchange="updateCounter()">
+          <div class="article-info">
+            <div class="article-title"><a href="${escapedUrl}" target="_blank">${escapedTitle}</a></div>
+            <div class="article-desc">${escapedDesc}</div>
+          </div>
+        </label>
+      `;
+      manualGroup.appendChild(itemDiv);
+
+      document.getElementById('manual-url').value = '';
+      updateCounter();
+      showToast('기사가 추가되었습니다.');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // ── 수동 보고서 추가 (PR3) ──
+
+  function _escapeHtml(s) {
+    return (s || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _appendReportRow(report) {
+    // manual-reports-group이 없으면 폼 바로 뒤에 생성
+    let group = document.getElementById('manual-reports-group');
+    if (!group) {
+      group = document.createElement('div');
+      group.id = 'manual-reports-group';
+      group.className = 'date-group';
+      group.innerHTML = '<h4 class="date-label">수동 추가 보고서</h4>';
+      // 수동 보고서 추가 폼(#manual-report-url 포함) 바로 뒤에 삽입
+      const reportForm = document.getElementById('manual-report-url').closest('.add-article-form');
+      reportForm.insertAdjacentElement('afterend', group);
+    }
+    const title = _escapeHtml(report.title);
+    const url = _escapeHtml(report.url || '');
+    const summary = _escapeHtml((report.summary_preview || '').slice(0, 200));
+    const item = document.createElement('div');
+    item.className = 'article-item selectable';
+    const urlLink = url ? ` <a href="${url}" target="_blank">(원문)</a>` : '';
+    item.innerHTML = `
+      <label class="checkbox-label">
+        <input type="checkbox" class="report-check"
+               data-id="report-${_escapeHtml(report.id)}"
+               data-title="${title}"
+               onchange="updateCounter()">
+        <div class="article-info">
+          <div class="article-title">📄 ${title}${urlLink}</div>
+          <div class="article-desc">${summary}</div>
+        </div>
+      </label>
+    `;
+    group.appendChild(item);
+  }
+
+  async function _submitReport(formData, loadingMsg) {
+    showLoading(loadingMsg);
+    try {
+      const resp = await fetch('/focus/add-report', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || '보고서 추가 실패');
+      }
+      _appendReportRow(data.report);
+      updateCounter();
+      if (data.report.warning) {
+        showToast('추가됨 (경고): ' + data.report.warning, true);
+      } else {
+        showToast('보고서가 추가되었습니다.');
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function addManualReportFromUrl() {
+    const urlInput = document.getElementById('manual-report-url');
+    const url = urlInput.value.trim();
+    if (!url) {
+      showToast('URL을 입력하세요.', true);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('url', url);
+    await _submitReport(fd, '보고서 메타데이터 추출 중... (PDF면 다운로드+요약, 최대 1분)');
+    urlInput.value = '';
+  }
+
+  async function addManualReportFromFile() {
+    const fileInput = document.getElementById('manual-report-file');
+    const file = fileInput.files[0];
+    if (!file) {
+      showToast('PDF 파일을 선택하세요.', true);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    await _submitReport(fd, 'PDF 업로드 + 텍스트 추출 + Claude 요약 중... (최대 1분)');
+    fileInput.value = '';
+  }
+
+  async function generateWeekly() {
+    const articles = getSelectedArticles();
+    const reports = getSelectedReports();
+    const expertInsight = (document.getElementById('expert-insight').value || '').trim();
+    if (articles.length === 0 && reports.length === 0) {
+      showToast('기사 또는 보고서를 하나 이상 선택하세요.', true);
+      return;
+    }
+    showLoading('Claude API로 주간 보고서를 생성 중입니다... (최대 1분 소요)');
+    try {
+      const data = await apiCall('/focus/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          article_ids: articles.map(a => a.id),
+          articles: articles,
+          reports: reports,
+          expert_insight: expertInsight,
+        }),
+      });
+      weeklyMarkdown = data.markdown;
+      document.getElementById('weekly-markdown-editor').value = data.markdown;
+      document.getElementById('weekly-editor-section').classList.remove('hidden');
+      _renderEditablePreview(data.html_preview);
+      document.getElementById('btn-publish-weekly').disabled = false;
+      showToast('주간 보고서 생성 완료');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // 미리보기 영역에 HTML을 contenteditable로 렌더 (2-2)
+  function _renderEditablePreview(html) {
+    const container = document.getElementById('weekly-preview-container');
+    container.innerHTML = html;
+    container.contentEditable = 'true';
+  }
+
+  async function refreshWeeklyPreview() {
+    const md = document.getElementById('weekly-markdown-editor').value;
+    weeklyMarkdown = md;
+    try {
+      const data = await apiCall('/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: md, type: 'weekly' }),
+      });
+      _renderEditablePreview(data.html);
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  // 사용자가 미리보기 편집을 망쳤을 때 마크다운에서 재렌더 (2-2)
+  async function resetPreviewToOriginal() {
+    if (!confirm('미리보기 편집 내용을 버리고 ② 마크다운에서 다시 렌더링합니다. 계속할까요?')) return;
+    await refreshWeeklyPreview();
+    showToast('미리보기를 마크다운 기준으로 재렌더했습니다.');
+  }
+
+  async function publishWeekly() {
+    const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
+    // 사용자가 미리보기 영역에서 직접 편집한 HTML (2-2)
+    const previewContainer = document.getElementById('weekly-preview-container');
+    const editedHtml = previewContainer.contentEditable === 'true'
+        ? (previewContainer.innerHTML || '').trim()
+        : '';
+    showLoading('보고서 발간 중... (이메일 → Drive → NotebookLM → 백업)');
+    try {
+      const data = await apiCall('/focus/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          markdown: md,
+          edited_html: editedHtml,
+        }),
+      });
+      const r = data.results;
+      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
+      if (r.drive && r.drive.success) msg += ' · Drive 저장';
+      else if (r.drive) msg += ' · Drive 실패';
+      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
+      else if (r.notebooklm && r.notebooklm.skipped) msg += ' · NotebookLM 인증 만료';
+      else if (r.notebooklm) msg += ' · NotebookLM 실패';
+      if (r.backup && r.backup.success) msg += ' · 로컬 백업';
+      else if (r.backup) msg += ' · 백업 실패';
+      showToast(msg);
+
+      // NotebookLM 인증 만료 시 재인증 안내
+      if (r.notebooklm && r.notebooklm.skipped) {
+        showNlmReauthPrompt(md);
+      } else {
+        location.reload();
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  let nlmReauthMarkdown = '';
+
+  function showNlmReauthPrompt(markdown) {
+    nlmReauthMarkdown = markdown;
+
+    // 기존 프롬프트가 있으면 제거
+    const existing = document.getElementById('nlm-reauth-prompt');
+    if (existing) existing.remove();
+
+    const div = document.createElement('div');
+    div.id = 'nlm-reauth-prompt';
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+    div.innerHTML = `
+      <div style="background:white;border-radius:12px;padding:32px;max-width:420px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.2)">
+        <h3 style="margin:0 0 12px">NotebookLM 인증 만료</h3>
+        <p style="color:#666;margin:0 0 20px">뉴스레터 발간은 완료되었으나, NotebookLM 저장이 건너뛰어졌습니다.<br>재인증 후 저장할 수 있습니다.</p>
+        <button id="nlm-reauth-open-btn" onclick="nlmReauthOpen()"
+                style="background:#4285f4;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px">
+          브라우저 로그인 열기
+        </button>
+        <button id="nlm-reauth-save-btn" onclick="nlmReauthSave()"
+                style="background:#34a853;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px;display:none">
+          로그인 완료 / 저장
+        </button>
+        <button onclick="document.getElementById('nlm-reauth-prompt').remove();location.reload()"
+                style="background:#dadce0;color:#333;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:4px">
+          건너뛰기
+        </button>
+      </div>
+    `;
+    document.body.appendChild(div);
+  }
+
+  async function nlmReauthOpen() {
+    const btn = document.getElementById('nlm-reauth-open-btn');
+    btn.disabled = true;
+    btn.textContent = '브라우저 여는 중...';
+    try {
+      const data = await apiCall('/nlm/reauth/open', { method: 'POST' });
+      if (data.success) {
+        btn.textContent = '브라우저 열림';
+        document.getElementById('nlm-reauth-save-btn').style.display = 'inline-block';
+      } else {
+        showToast('재인증 브라우저 열기 실패: ' + data.error, true);
+        btn.disabled = false;
+        btn.textContent = '브라우저 로그인 열기';
+      }
+    } catch (e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = '브라우저 로그인 열기';
+    }
+  }
+
+  async function nlmReauthSave() {
+    const btn = document.getElementById('nlm-reauth-save-btn');
+    btn.disabled = true;
+    btn.textContent = '저장 중...';
+    try {
+      const saveResult = await apiCall('/nlm/reauth/save', { method: 'POST' });
+      if (!saveResult.success || !saveResult.valid) {
+        showToast('재인증 실패: ' + (saveResult.reason || '알 수 없음'), true);
+        btn.disabled = false;
+        btn.textContent = '로그인 완료 / 저장';
+        return;
+      }
+      showToast('재인증 성공! NotebookLM 저장 중...');
+      const nlmResult = await apiCall('/nlm/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: nlmReauthMarkdown }),
+      });
+      if (nlmResult.success) {
+        showToast('NotebookLM 저장 완료!');
+      } else {
+        showToast('NotebookLM 저장 실패: ' + nlmResult.error, true);
+      }
+      document.getElementById('nlm-reauth-prompt').remove();
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = '로그인 완료 / 저장';
+    }
+  }
+</script>
+{% endblock %}
