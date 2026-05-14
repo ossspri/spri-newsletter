@@ -7,3 +7,7 @@ id,sent_at,type,article_count,recipient_count,status,error_message,drive_doc_id,
 202605140702181485,2026-05-14T07:02:18,daily,25,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
 202605141512077873,2026-05-14T15:12:07,weekly,0,1,success,,13JwdSa_FPe_JHrR8_2IRzKyNt546BN_u8vaeh6HZs8M,
 202605142354513118,2026-05-14T23:54:51,daily,0,1,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605150730055347,2026-05-15T07:30:05,daily,0,0,failed,"git_sync pull 실패: git pull --rebase 실패 (충돌 가능, 발송 차단): error: cannot pull with rebase: You have unstaged changes.
+error: Please commit or stash them."
+202605150800057486,2026-05-15T08:00:05,daily,0,0,failed,"git_sync pull 실패: git pull --rebase 실패 (충돌 가능, 발송 차단): error: cannot pull with rebase: You have unstaged changes.
+error: Please commit or stash them."
