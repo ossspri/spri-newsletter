@@ -7,10 +7,11 @@ venv/
 credentials/
 
 # Data — 발행 결과물(.md, .csv)은 git으로 동료와 공유.
-# 개인용·런타임 파일만 무시 (data/drive_state.json, data/manual_reports/, 레거시 sqlite).
+# 개인용·런타임 파일만 무시 (data/drive_state.json, data/manual_reports/, 레거시 sqlite, FileDB lock).
 data/drive_state.json
 data/manual_reports/
 data/spri_newsletter.db
+data/db/.lock
 logs/
 
 # Python
