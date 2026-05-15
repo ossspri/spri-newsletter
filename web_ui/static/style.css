@@ -164,6 +164,9 @@ body {
 .btn-danger { background: #e74c3c; color: #fff; }
 .btn-danger:hover { background: #c0392b; }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-delete-text { color: #ff8a80; }
+.btn-delete-text:hover { color: #ff5252; }
+.btn-delete-text:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── 기사 미리보기 키워드 ── */
 .keywords-box {
