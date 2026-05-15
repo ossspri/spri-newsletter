@@ -425,6 +425,41 @@ class TestRootRedirect:
         assert "/daily" in resp.headers["Location"]
 
 
+class TestFocusMenuOnly:
+    """features.focus_menu_only=True 동작 테스트 (동료 PC 배포본)."""
+
+    @pytest.fixture
+    def focus_only_client(self, db_conn):
+        cfg = dict(SAMPLE_CONFIG)
+        cfg["features"] = {"focus_menu_only": True}
+        application = create_app(cfg, db_conn)
+        application.config["TESTING"] = True
+        return application.test_client()
+
+    def test_root_redirects_to_focus(self, focus_only_client):
+        """focus_menu_only=True 시 / → /focus 로 리다이렉트한다."""
+        resp = focus_only_client.get("/")
+        assert resp.status_code == 302
+        assert "/focus" in resp.headers["Location"]
+
+    def test_focus_page_hides_daily_weekly_tabs(self, focus_only_client):
+        """focus_menu_only=True 시 Daily/Weekly 탭이 렌더링되지 않는다."""
+        resp = focus_only_client.get("/focus")
+        assert resp.status_code == 200
+        html = resp.data.decode("utf-8")
+        # 탭 a 태그 자체가 없어야 한다 (Focus 탭의 active class 검사는 별도).
+        assert "daily_page" not in html
+        assert "weekly_page" not in html
+
+    def test_default_config_keeps_daily_weekly_tabs(self, client):
+        """기본(SAMPLE_CONFIG, features 누락) 동작은 Daily/Weekly 탭 유지."""
+        resp = client.get("/focus")
+        assert resp.status_code == 200
+        html = resp.data.decode("utf-8")
+        assert "Daily" in html
+        assert "Weekly" in html
+
+
 class TestPreviewEndpoint:
     """POST /preview 미리보기 테스트."""
 

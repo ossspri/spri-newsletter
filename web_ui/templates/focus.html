@@ -21,39 +21,6 @@
 
   <div id="warning-25" class="alert alert-warning hidden">25건 초과 선택. 최대 25건까지 권장됩니다.</div>
 
-  <!-- Daily 수집 기사 — 전체를 하나의 +/- 토글로 접힘 (기본 접힘) -->
-  {% if weekly_articles %}
-  <div class="date-group source-group collapsed" data-source-group="daily-all">
-    <h4 class="date-label source-label" onclick="toggleSourceGroup(this)">
-      <span class="toggle-icon">+</span>
-      Daily 수집 기사
-      <span class="source-count">({{ weekly_articles|length }})</span>
-    </h4>
-    <div class="source-articles" style="display: none;">
-      {% for a in weekly_articles %}
-      <div class="article-item selectable">
-        <label class="checkbox-label">
-          <input type="checkbox" class="article-check"
-                 data-id="{{ a.id }}"
-                 data-title="{{ a.title }}"
-                 data-url="{{ a.url }}"
-                 data-description="{{ a.description }}"
-                 data-source="{{ a.source_name }}"
-                 data-original-title="{{ a.original_title or a.title }}"
-                 data-original-description="{{ a.original_description or a.description }}"
-                 onchange="updateCounter()">
-          <div class="article-info">
-            <div class="article-title"><a href="{{ a.url }}" target="_blank">{{ a.title }}</a></div>
-            <div class="article-meta">{{ a.source_name }} · {{ a.published_at[:10] }}</div>
-            <div class="article-desc">{{ a.description }}</div>
-          </div>
-        </label>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
   <!-- 수동 기사 추가 (입력 폼이 위) -->
   <div class="add-article-form">
     <h4>수동 기사 추가</h4>

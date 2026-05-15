@@ -96,6 +96,9 @@ features:
   news_mode: "gnews"
   # A' 가 실패해도 GNews 로 자동 폴백 (현재 기본값 gnews 라 큰 영향 없음).
   news_mode_fallback_on_failure: true
+  # 동료 PC 배포본은 true 로 두면 Daily/Weekly 메뉴가 숨겨지고
+  # Focus 메뉴만 노출된다. 기본값 false (메인 PC).
+  focus_menu_only: true
 
 # ── A'(industry-scan) 설정 ──
 # 동료 PC 에서는 사용되지 않지만 키 정의를 유지 (코드 호환).

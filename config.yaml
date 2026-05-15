@@ -108,6 +108,9 @@ features:
   # news_mode가 "industry_scan"인데 A'이 실패할 때 GNews로 자동 폴백할지.
   # 운영 안정성 우선 시 true 권장 (오늘 발송 스킵하지 않음).
   news_mode_fallback_on_failure: true
+  # 동료 PC 배포본은 true 로 두면 Daily/Weekly 메뉴가 숨겨지고
+  # Focus 메뉴만 노출된다. 기본값 false (메인 PC).
+  focus_menu_only: false
 
 # ── A'(industry-scan) 설정 ──
 industry_scan:

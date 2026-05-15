@@ -114,10 +114,20 @@ def create_app(config: dict, db_conn) -> Flask:
     def get_cfg():
         return app.config["config"]
 
+    @app.context_processor
+    def inject_ui_flags():
+        return {
+            "focus_menu_only": bool(
+                get_cfg().get("features", {}).get("focus_menu_only", False)
+            ),
+        }
+
     # ── 루트 ──
 
     @app.route("/")
     def index():
+        if get_cfg().get("features", {}).get("focus_menu_only", False):
+            return redirect(url_for("focus_page"))
         return redirect(url_for("daily_page"))
 
     # ── Daily 탭 ──
@@ -435,17 +445,15 @@ def create_app(config: dict, db_conn) -> Flask:
     @app.route("/focus")
     def focus_page():
         db = get_db()
-        articles = get_weekly_articles(db, days=7)
         # 수동 추가 기사
         manual_articles = get_all_manual_articles(db)
         # 수동 추가 보고서 (PR3)
         manual_reports = get_all_manual_reports(db)
         return render_template(
             "focus.html",
-            weekly_articles=articles,  # 출처 그룹 없이 단일 list (1.3 수정)
             manual_articles=manual_articles,
             manual_reports=manual_reports,
-            total_count=len(articles) + len(manual_articles),
+            total_count=len(manual_articles),
         )
 
     @app.route("/focus/translate-articles", methods=["POST"])
