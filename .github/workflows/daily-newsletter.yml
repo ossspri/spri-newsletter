@@ -1,0 +1,69 @@
+name: Daily Newsletter (KST 07:30)
+
+on:
+  schedule:
+    # GitHub Actions cron 은 UTC 기준. KST 07:30 = UTC 22:30 (전날)
+    - cron: '30 22 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-newsletter
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Google OAuth credentials
+        run: |
+          mkdir -p credentials
+          echo "${{ secrets.GOOGLE_CREDENTIALS_B64 }}" | base64 -d > credentials/google_credentials.json
+          echo "${{ secrets.GOOGLE_TOKEN_B64 }}" | base64 -d > credentials/google_token.json
+          chmod 600 credentials/google_*.json
+
+      - name: Configure git identity (for main.py git_sync push)
+        run: |
+          git config user.name "newsletter-bot"
+          git config user.email "newsletter-bot@users.noreply.github.com"
+
+      - name: Run daily pipeline
+        env:
+          GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          TZ: Asia/Seoul
+        run: python main.py --mode daily --cron
+
+      - name: Run A/A'/B quality measurement
+        if: success()
+        env:
+          GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          TZ: Asia/Seoul
+        run: python scripts/daily_ab_test.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cron-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 14
