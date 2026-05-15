@@ -161,6 +161,9 @@ body {
 .btn-secondary { background: #6c757d; color: #fff; }
 .btn-outline { background: transparent; color: #2d5a8e; border: 1px solid #2d5a8e; }
 .btn-outline:hover { background: #2d5a8e; color: #fff; }
+.btn-danger { background: #e74c3c; color: #fff; }
+.btn-danger:hover { background: #c0392b; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── 기사 미리보기 키워드 ── */
 .keywords-box {

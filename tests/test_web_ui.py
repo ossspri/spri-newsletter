@@ -6,8 +6,15 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.db import FileDB, insert_daily_articles, log_newsletter
+from src.db import (
+    FileDB,
+    insert_daily_articles,
+    insert_manual_article,
+    insert_manual_report,
+    log_newsletter,
+)
 from web_ui.app import create_app
+from web_ui import app as app_module
 
 
 SAMPLE_CONFIG = {
@@ -256,6 +263,7 @@ class TestWeeklyAddArticle:
 
         assert resp.status_code == 200
         assert data["success"] is True
+        assert data["article"]["id"]
 
     def test_add_article_missing_url(self, client):
         """URL 없이 요청하면 에러를 반환한다."""
@@ -579,3 +587,140 @@ class TestWeeklyAddReport:
         data = json.loads(resp.data)
         assert resp.status_code == 400
         assert "PDF" in data["error"]
+
+
+# ── DELETE /focus/article/<id> ──
+
+
+class TestFocusDeleteArticle:
+    """DELETE /focus/article/<id> — 수동 추가 기사 단건 삭제."""
+
+    def test_delete_success(self, client, db_conn):
+        insert_manual_article(db_conn, "T", "https://t.com/1", "d")
+        rows = db_conn.table("manual_articles").rows()
+        target_id = str(rows[0]["id"])
+
+        resp = client.delete(f"/focus/article/{target_id}")
+        data = json.loads(resp.data)
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["deleted_id"] == target_id
+        assert len(db_conn.table("manual_articles").rows()) == 0
+
+    def test_delete_not_found(self, client, db_conn):
+        insert_manual_article(db_conn, "T", "https://t.com/1", "d")
+        resp = client.delete("/focus/article/nonexistent-id-xyz")
+        data = json.loads(resp.data)
+        assert resp.status_code == 404
+        assert data["success"] is False
+        # 기존 데이터는 보존
+        assert len(db_conn.table("manual_articles").rows()) == 1
+
+    def test_delete_does_not_affect_other_tables(self, client, db_conn):
+        insert_daily_articles(db_conn, [{
+            "title": "Daily",
+            "url": "https://daily.com/1",
+            "description": "d",
+            "source_name": "Src",
+            "published_at": "2026-05-15T01:00:00Z",
+        }])
+        insert_manual_article(db_conn, "M", "https://m.com/1", "")
+        manual_id = str(db_conn.table("manual_articles").rows()[0]["id"])
+
+        resp = client.delete(f"/focus/article/{manual_id}")
+        assert resp.status_code == 200
+
+        assert len(db_conn.table("manual_articles").rows()) == 0
+        assert len(db_conn.table("daily_articles").rows()) == 1
+
+
+# ── DELETE /focus/report/<id> ──
+
+
+class TestFocusDeleteReport:
+    """DELETE /focus/report/<id> — 수동 추가 보고서 단건 삭제 + 파일 정리."""
+
+    def test_delete_url_report_success(self, client, db_conn):
+        rid = insert_manual_report(
+            db_conn,
+            title="URL 보고서",
+            source_type="url",
+            url="https://example.com/r1",
+            summary="요약",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        data = json.loads(resp.data)
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["deleted_id"] == rid
+        assert len(db_conn.table("manual_reports").rows()) == 0
+
+    def test_delete_pdf_report_removes_files(self, client, db_conn, tmp_path, monkeypatch):
+        # MANUAL_REPORTS_DIR 격리
+        fake_dir = tmp_path / "manual_reports"
+        fake_dir.mkdir()
+        monkeypatch.setattr(app_module, "MANUAL_REPORTS_DIR", fake_dir)
+
+        # 실제 파일 2개 생성
+        pdf_path = fake_dir / "report-abc.pdf"
+        txt_path = fake_dir / "report-abc.txt"
+        pdf_path.write_bytes(b"%PDF-1.4\nfake")
+        txt_path.write_text("fake text", encoding="utf-8")
+
+        rid = insert_manual_report(
+            db_conn,
+            title="PDF 보고서",
+            source_type="pdf",
+            original_filename="report.pdf",
+            file_path=str(pdf_path),
+            text_path=str(txt_path),
+            summary="요약",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+
+        # row 삭제 확인
+        assert len(db_conn.table("manual_reports").rows()) == 0
+        # 파일도 unlink 됨
+        assert not pdf_path.exists()
+        assert not txt_path.exists()
+
+    def test_delete_report_not_found(self, client, db_conn):
+        insert_manual_report(
+            db_conn, title="T", source_type="url", url="https://t.com",
+        )
+        resp = client.delete("/focus/report/nonexistent-id-xyz")
+        data = json.loads(resp.data)
+        assert resp.status_code == 404
+        assert data["success"] is False
+        assert len(db_conn.table("manual_reports").rows()) == 1
+
+    def test_delete_report_with_path_outside_dir_does_not_unlink(
+        self, client, db_conn, tmp_path, monkeypatch
+    ):
+        # MANUAL_REPORTS_DIR 격리
+        fake_dir = tmp_path / "manual_reports"
+        fake_dir.mkdir()
+        monkeypatch.setattr(app_module, "MANUAL_REPORTS_DIR", fake_dir)
+
+        # 디렉토리 밖에 파일을 둠 — path traversal 시나리오
+        outside = tmp_path / "outside.pdf"
+        outside.write_bytes(b"%PDF-1.4\nshould-not-delete")
+
+        rid = insert_manual_report(
+            db_conn,
+            title="Outside",
+            source_type="pdf",
+            file_path=str(outside),
+            summary="",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+        # row는 삭제됐지만 파일은 보존
+        assert len(db_conn.table("manual_reports").rows()) == 0
+        assert outside.exists()

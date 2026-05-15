@@ -81,6 +81,8 @@
           <div class="article-desc">{{ a.description }}</div>
         </div>
       </label>
+      <button type="button" class="btn btn-small btn-danger"
+              onclick="deleteManualArticle('{{ a.id }}', this)">삭제</button>
     </div>
     {% endfor %}
   </div>
@@ -117,6 +119,8 @@
           <div class="article-desc">{{ (r.summary or '')[:200] }}{% if (r.summary or '')|length > 200 %}…{% endif %}</div>
         </div>
       </label>
+      <button type="button" class="btn btn-small btn-danger"
+              onclick="deleteManualReport('{{ r.id }}', this)">삭제</button>
     </div>
     {% endfor %}
   </div>
@@ -306,6 +310,7 @@
       const escapedTitle = a.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const escapedDesc = (a.description || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const escapedUrl = a.url.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      const escapedId = (a.id || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
       itemDiv.innerHTML = `
         <label class="checkbox-label">
           <input type="checkbox" class="article-check"
@@ -320,6 +325,8 @@
             <div class="article-desc">${escapedDesc}</div>
           </div>
         </label>
+        <button type="button" class="btn btn-small btn-danger"
+                onclick="deleteManualArticle('${escapedId}', this)">삭제</button>
       `;
       manualGroup.appendChild(itemDiv);
 
@@ -370,6 +377,8 @@
           <div class="article-desc">${summary}</div>
         </div>
       </label>
+      <button type="button" class="btn btn-small btn-danger"
+              onclick="deleteManualReport('${_escapeHtml(report.id)}', this)">삭제</button>
     `;
     group.appendChild(item);
   }
@@ -611,6 +620,42 @@
       showToast(e.message, true);
       btn.disabled = false;
       btn.textContent = '로그인 완료 / 저장';
+    }
+  }
+
+  async function deleteManualArticle(articleId, btn) {
+    if (!articleId) { showToast('id가 없어 삭제할 수 없습니다.', true); return; }
+    if (!confirm('이 수동 추가 기사를 삭제하시겠습니까?')) return;
+    btn.disabled = true;
+    try {
+      await apiCall('/focus/article/' + encodeURIComponent(articleId), { method: 'DELETE' });
+      const item = btn.closest('.article-item');
+      const group = document.getElementById('manual-articles-group');
+      if (item) item.remove();
+      if (group && group.querySelectorAll('.article-item').length === 0) group.remove();
+      updateCounter();
+      showToast('기사가 삭제되었습니다.');
+    } catch (e) {
+      btn.disabled = false;
+      showToast(e.message, true);
+    }
+  }
+
+  async function deleteManualReport(reportId, btn) {
+    if (!reportId) { showToast('id가 없어 삭제할 수 없습니다.', true); return; }
+    if (!confirm('이 수동 추가 보고서를 삭제하시겠습니까? (업로드된 PDF/텍스트 파일도 함께 삭제됩니다)')) return;
+    btn.disabled = true;
+    try {
+      await apiCall('/focus/report/' + encodeURIComponent(reportId), { method: 'DELETE' });
+      const item = btn.closest('.article-item');
+      const group = document.getElementById('manual-reports-group');
+      if (item) item.remove();
+      if (group && group.querySelectorAll('.article-item').length === 0) group.remove();
+      updateCounter();
+      showToast('보고서가 삭제되었습니다.');
+    } catch (e) {
+      btn.disabled = false;
+      showToast(e.message, true);
     }
   }
 </script>

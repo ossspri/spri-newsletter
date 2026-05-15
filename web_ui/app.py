@@ -28,6 +28,8 @@ from src.db import (
     clear_today_archive,
     clear_today_daily_articles,
     clear_all_manual_articles,
+    delete_manual_article,
+    delete_manual_report,
 )
 from src.manual_reports import (
     MANUAL_REPORTS_DIR,
@@ -479,9 +481,15 @@ def create_app(config: dict, db_conn) -> Flask:
         if not inserted:
             return jsonify({"success": False, "error": "이미 추가된 URL입니다."}), 409
 
+        new_id = ""
+        for r in get_all_manual_articles(get_db()):
+            if str(r.get("url", "")) == url:
+                new_id = str(r.get("id", ""))
+                break
+
         return jsonify({
             "success": True,
-            "article": {"title": title, "url": url, "description": description},
+            "article": {"id": new_id, "title": title, "url": url, "description": description},
         })
 
     @app.route("/focus/add-report", methods=["POST"])
@@ -631,6 +639,51 @@ def create_app(config: dict, db_conn) -> Flask:
         except Exception as e:
             logger.exception("수동 보고서 추가 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/focus/article/<article_id>", methods=["DELETE"])
+    def focus_delete_article(article_id):
+        article_id = (article_id or "").strip()
+        if not article_id:
+            return jsonify({"success": False, "error": "id가 필요합니다."}), 400
+        try:
+            ok = delete_manual_article(get_db(), article_id)
+        except Exception as e:
+            logger.exception("수동 기사 삭제 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+        if not ok:
+            return jsonify({"success": False, "error": "해당 id의 기사를 찾을 수 없습니다."}), 404
+        return jsonify({"success": True, "deleted_id": article_id})
+
+    @app.route("/focus/report/<report_id>", methods=["DELETE"])
+    def focus_delete_report(report_id):
+        report_id = (report_id or "").strip()
+        if not report_id:
+            return jsonify({"success": False, "error": "id가 필요합니다."}), 400
+        try:
+            row = delete_manual_report(get_db(), report_id)
+        except Exception as e:
+            logger.exception("수동 보고서 삭제 실패: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+        if row is None:
+            return jsonify({"success": False, "error": "해당 id의 보고서를 찾을 수 없습니다."}), 404
+
+        try:
+            base = MANUAL_REPORTS_DIR.resolve()
+            for key in ("file_path", "text_path"):
+                val = (row.get(key) or "").strip()
+                if not val:
+                    continue
+                p = Path(val).resolve()
+                try:
+                    p.relative_to(base)
+                except ValueError:
+                    logger.warning("보고서 부수 파일이 MANUAL_REPORTS_DIR 밖에 있음, 스킵: %s", p)
+                    continue
+                p.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning("보고서 부수 파일 정리 일부 실패 (id=%s): %s", report_id, e)
+
+        return jsonify({"success": True, "deleted_id": report_id})
 
     @app.errorhandler(413)
     def too_large(_e):

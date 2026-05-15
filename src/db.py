@@ -464,6 +464,15 @@ def clear_all_manual_articles(db: FileDB) -> int:
     return count
 
 
+def delete_manual_article(db: FileDB, article_id: str) -> bool:
+    """manual_articles 에서 id 가 일치하는 단일 행을 삭제한다."""
+    deleted = db.table("manual_articles").delete_where(
+        lambda r: str(r.get("id", "")) == str(article_id)
+    )
+    logger.info("delete_manual_article: id=%s deleted=%d", article_id, deleted)
+    return deleted > 0
+
+
 # ── manual_reports (Weekly 수동 보고서 추가) ──
 
 
@@ -540,3 +549,19 @@ def clear_all_manual_reports(db: FileDB) -> int:
         table.overwrite([])
     logger.info("manual_reports 전체 삭제: %d건", count)
     return count
+
+
+def delete_manual_report(db: FileDB, report_id: str) -> dict | None:
+    """manual_reports 에서 id 가 일치하는 단일 행을 삭제. 삭제된 row dict 반환(파일 정리용)."""
+    target = None
+    for r in db.table("manual_reports").rows():
+        if str(r.get("id", "")) == str(report_id):
+            target = r
+            break
+    if target is None:
+        return None
+    deleted = db.table("manual_reports").delete_where(
+        lambda r: str(r.get("id", "")) == str(report_id)
+    )
+    logger.info("delete_manual_report: id=%s deleted=%d", report_id, deleted)
+    return target if deleted > 0 else None

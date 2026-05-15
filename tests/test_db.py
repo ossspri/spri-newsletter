@@ -9,6 +9,8 @@ from src.db import (
     archive_articles,
     check_today_sent,
     clear_all_manual_reports,
+    delete_manual_article,
+    delete_manual_report,
     get_all_manual_articles,
     get_all_manual_reports,
     get_articles_for_date_range,
@@ -445,3 +447,67 @@ class TestManualReports:
         deleted = clear_all_manual_reports(db)
         assert deleted == 2
         assert len(db.table("manual_reports").rows()) == 0
+
+
+# ── 단건 삭제 (수동 기사) ──
+
+
+class TestDeleteManualArticle:
+    def test_delete_manual_article_removes_target_only(self, db):
+        insert_manual_article(db, "A", "https://a.com/1", "descA")
+        insert_manual_article(db, "B", "https://b.com/2", "descB")
+        rows = db.table("manual_articles").rows()
+        assert len(rows) == 2
+        target_id = str(rows[0]["id"])
+        other_id = str(rows[1]["id"])
+
+        assert delete_manual_article(db, target_id) is True
+
+        remaining = db.table("manual_articles").rows()
+        assert len(remaining) == 1
+        assert str(remaining[0]["id"]) == other_id
+
+    def test_delete_manual_article_returns_false_when_missing(self, db):
+        insert_manual_article(db, "A", "https://a.com/1", "")
+        assert delete_manual_article(db, "nonexistent-id") is False
+        assert len(db.table("manual_articles").rows()) == 1
+
+    def test_delete_manual_article_only_touches_its_own_table(self, db):
+        insert_daily_articles(db, [{
+            "title": "Daily",
+            "url": "https://daily.com/1",
+            "description": "d",
+            "source_name": "Src",
+            "published_at": "2026-05-15T01:00:00Z",
+        }])
+        insert_manual_article(db, "M", "https://m.com/1", "")
+        manual_rows = db.table("manual_articles").rows()
+        target_id = str(manual_rows[0]["id"])
+
+        assert delete_manual_article(db, target_id) is True
+
+        assert len(db.table("manual_articles").rows()) == 0
+        assert len(db.table("daily_articles").rows()) == 1
+
+
+# ── 단건 삭제 (수동 보고서) ──
+
+
+class TestDeleteManualReport:
+    def test_delete_manual_report_removes_target_and_returns_row(self, db):
+        rid_a = insert_manual_report(db, title="A", source_type="url", url="https://a.com")
+        rid_b = insert_manual_report(db, title="B", source_type="url", url="https://b.com")
+
+        row = delete_manual_report(db, rid_a)
+        assert row is not None
+        assert str(row["id"]) == rid_a
+        assert row["title"] == "A"
+
+        remaining = db.table("manual_reports").rows()
+        assert len(remaining) == 1
+        assert str(remaining[0]["id"]) == rid_b
+
+    def test_delete_manual_report_returns_none_when_missing(self, db):
+        insert_manual_report(db, title="A", source_type="url", url="https://a.com")
+        assert delete_manual_report(db, "nonexistent-id") is None
+        assert len(db.table("manual_reports").rows()) == 1
