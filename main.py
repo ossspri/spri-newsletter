@@ -6,7 +6,9 @@ import argparse
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -115,6 +117,18 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
             markdown_body = scan.generate(date_str)
             logger.info("A'(industry-scan) 본문 생성 성공 (%d자)",
                         len(markdown_body))
+
+            # A' 기사 → daily_articles 저장 (Weekly/Focus 탭 노출용)
+            scan_articles = extract_article_urls(markdown_body)
+            today_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            for sa in scan_articles:
+                sa["published_at"] = today_iso
+                sa["source_name"] = urlparse(sa["url"]).netloc.removeprefix("www.")
+                sa["description"] = ""
+            if scan_articles:
+                inserted = insert_daily_articles(db_conn, scan_articles)
+                logger.info("A' 기사 %d건 daily_articles 삽입", inserted)
+
         except IndustryScanError as e:
             if fallback_enabled:
                 logger.warning(

@@ -442,6 +442,12 @@ class TestIndustryScanMode:
         mock_scan.generate.assert_called_once()
         mock_gmail.send_email.assert_called_once()
 
+        # A' 기사가 daily_articles에 삽입되었는지 검증
+        rows = db_conn.table("daily_articles").rows()
+        assert len(rows) == 1
+        assert rows[0]["url"] == "https://reuters.com/x"
+        assert rows[0]["source_name"] == "reuters.com"
+
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
