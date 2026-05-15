@@ -1,7 +1,10 @@
 """src/google_auth.py — Google OAuth2 인증 공통 모듈
 
-PRD 9.1: Gmail API, Drive API, Docs API에 필요한 OAuth2 자격증명을 관리한다.
+PRD 9.1: Gmail API 에 필요한 OAuth2 자격증명을 관리한다.
 credentials/google_credentials.json → google_token.json 흐름.
+
+(제거됨, 2026-05-15) 이전엔 Drive API / Docs API scope 도 포함했으나
+Drive/NotebookLM 통합 제거와 함께 Gmail scope 2개만 남았다.
 """
 import logging
 from pathlib import Path
@@ -12,12 +15,14 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 logger = logging.getLogger(__name__)
 
-# PRD 9.1: gmail.send, drive.file, documents
+# 2026-05-15 Drive/NotebookLM 통합 제거 + Google Sheets DB 마이그레이션 완료로
+# OAuth scope를 Gmail 2개로 축소.
+# - gmail.send: 발송
+# - gmail.readonly: Sent dedup의 messages.list q 검색
+#   (gmail.metadata는 q 파라미터 거부)
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 
@@ -46,9 +51,13 @@ def get_google_credentials(
     # 토큰 갱신 또는 새로 발급
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            logger.info("토큰 갱신 중...")
-            creds.refresh(Request())
-        else:
+            try:
+                logger.info("토큰 갱신 중...")
+                creds.refresh(Request())
+            except Exception as e:
+                logger.warning("토큰 갱신 실패, 재인증 진행: %s", e)
+                creds = None
+        if not creds or not creds.valid:
             if not creds_file.exists():
                 raise FileNotFoundError(
                     f"Google OAuth2 클라이언트 시크릿 파일을 찾을 수 없습니다: {credentials_path}\n"

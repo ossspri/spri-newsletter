@@ -1,50 +1,123 @@
 # ── 뉴스 수집 ──
 gnews:
   queries:
-    - "software"
-    - "SaaS"
-    - "AI regulation"
-    - "AI policy"
-    - "big tech AI"
-    - "AI semiconductor GPU"
-    - "software developer"
-    - "AI research breakthrough"
+    # 기업/산업 (시장·실적)
+    - '"big tech earnings"'
+    - '"enterprise software"'
+    - '"SaaS company"'
+    # 정책/법제
+    - '"AI regulation"'
+    # 기술/연구 (투자 관점)
+    - '"AI startup funding"'
+    - '"generative AI" enterprise'
+    # 하드웨어/인프라
+    - '"AI chip" OR "AI semiconductor"'
+    - '"AI datacenter"'
+    # 거시 (IPO/M&A)
+    - '"tech IPO" OR "software acquisition"'
   lang: "en"
-  max_per_query: 50
+  # 검색 범위를 제목/설명으로 제한 → 본문 우연 매칭 노이즈 제거
+  search_in: "title,description"
+  # 화이트리스트 필터링 후에도 충분한 기사 수 확보 위해 상향
+  max_per_query: 100
+  # 화이트리스트 — GNews 무료 API의 실제 source 분포를 기반으로 선정 (probe 결과).
+  # WSJ/FT/Barron's/MarketWatch/The Verge/Ars Technica 등은 GNews에서 거의 인덱싱되지
+  # 않아 제외(추가해도 매칭이 거의 없음). 빈 리스트면 필터링 비활성화.
+  source_whitelist:
+    # 글로벌 금융/시장
+    - "Reuters"
+    - "Bloomberg"
+    - "Bnn Bloomberg"
+    - "CNBC"
+    - "Seeking Alpha"
+    - "Benzinga"
+    - "MarketScreener"
+    - "Investor's Business Daily"
+    - "Business Insider"
+    - "Forbes"
+    - "Fortune"
+    # 글로벌 기술 매체 (시장/기업 관점)
+    - "TechCrunch"
+    - "TNW"
+    - "TechStartups.com"
+    - "iTWire"
+    # 인도 비즈니스 (GNews 영문 인덱스 비중 큼, SW/IT 산업 비중 높음)
+    - "The Economic Times"
+    - "Livemint"
+    - "The Hindu Business Line"
+    - "The Financial Express"
+    - "NDTV Profit"
+    - "CNBC TV18"
+    - "Moneycontrol"
+  # Fallback 가드: 최종 기사가 min_articles 미만이면 fallback_queries로 보충 수집.
+  # fallback 결과에도 화이트리스트가 적용되므로 노이즈 회귀 방지.
+  min_articles: 10
+  # 구체적 SW 기업/제품명 — 광범위 키워드보다 시그널/노이즈 비율이 훨씬 좋음
+  fallback_queries:
+    - "OpenAI"
+    - "Microsoft AI"
+    - "Google Cloud"
+    - "Amazon AWS"
+    - "Salesforce"
+    - "Oracle cloud"
+    - "NVIDIA AI"
+    - "Snowflake OR Databricks"
+    - "Meta AI"
+    - "Adobe AI"
+    - "ServiceNow"
 
 # ── 뉴스레터 ──
 newsletter:
   max_articles: 25
   model: "claude-sonnet-4-20250514"
-  max_tokens: 4096
+  max_tokens: 16000
 
 # ── 이메일 수신자 ──
 recipients:
   daily:
     - "hsy@spri.kr"
+    - "parkth@spri.kr"
+    - "hchoi@spri.kr"
+    - "ryucy@spri.kr"
+    - "younghwan.kwon@spri.kr"
+    - "dahin.kim@spri.kr"
+    - "jeonjiyeon@spri.kr"
   weekly:
     - "hsy@spri.kr"
-
-# ── Google Sheets (DB) ──
-google_sheets:
-  spreadsheet_id: "1qVL5oxeNfh7SeTDVi_naqyle2RaW2TnigK4wlSYrlS0"
-
-# ── Google Drive ──
-drive:
-  folder_id: "1D9K1kwSogf1imTRSXv3hhoKHJmODwwsk"
-
-# ── NotebookLM ──
-notebooklm:
-  notebook_prefix: "SPRi"
-
-# ── 스케줄 ──
-schedule:
-  daily_time: "06:00"
 
 # ── 웹 UI ──
 web_ui:
   host: "127.0.0.1"
   port: 5000
+
+# ── Feature flags ──
+features:
+  # check_today_sent을 Gmail Sent 검색으로 위임 (멀티 PC에서도 안전).
+  # false 또는 GmailService 미주입 시 newsletter_log.csv로 fallback.
+  gmail_dedup: true
+  # 발행 결과물(.md, .csv) git 자동 동기화 (P0 2026-05-13).
+  # publish 직전 git pull --rebase, 직후 data/newsletters·data/db 변경분
+  # commit + push. flag off 시 모두 no-op (로컬 백업만).
+  git_autosync: true
+  # 실제 git 명령 없이 로그만 (배포 전 검증용).
+  git_autosync_dry_run: false
+  # Daily 뉴스레터 본문 생성 모드 (2026-05-14 Phase 1 A→A' 교체).
+  # "industry_scan" — A'(prism 4-Pass + 후처리, ~5-8분, 30+회 Claude 호출)
+  # "gnews"        — A(GNews 25건 + claude.generate_daily, 빠르고 단순)
+  news_mode: "industry_scan"
+  # news_mode가 "industry_scan"인데 A'이 실패할 때 GNews로 자동 폴백할지.
+  # 운영 안정성 우선 시 true 권장 (오늘 발송 스킵하지 않음).
+  news_mode_fallback_on_failure: true
+  # 동료 PC 배포본은 true 로 두면 Daily/Weekly 메뉴가 숨겨지고
+  # Focus 메뉴만 노출된다. 기본값 false (메인 PC).
+  focus_menu_only: false
+
+# ── A'(industry-scan) 설정 ──
+industry_scan:
+  # Claude tool_use 루프 최대 횟수 (4-Pass는 보통 20~30회).
+  max_iter: 35
+  # null이면 prism repo의 기본 SKILL.md 경로(`prism/skills/industry-scan.md`).
+  skill_path: null
 
 # ── 로깅 ──
 logging:

@@ -11,7 +11,7 @@ from main import (
     _save_local_backup,
     load_config,
 )
-from tests.conftest import create_fake_sheets_db
+from src.db import FileDB
 
 
 SAMPLE_CONFIG = {
@@ -30,6 +30,9 @@ SAMPLE_CONFIG = {
         "weekly": ["director@spri.kr"],
     },
     "logging": {"level": "INFO", "file": "logs/spri.log"},
+    # Phase 1 (2026-05-14): 기존 GNews 흐름을 검증하므로 명시적으로 gnews 모드.
+    # 신규 industry_scan 모드는 TestIndustryScanMode에서 별도 검증.
+    "features": {"news_mode": "gnews"},
 }
 
 SAMPLE_ARTICLES = [
@@ -58,24 +61,21 @@ SAMPLE_MARKDOWN = """\
 
 
 @pytest.fixture
-def db_conn():
-    """인메모리 SheetsDB."""
-    return create_fake_sheets_db()
+def db_conn(tmp_path):
+    """임시 디렉토리 기반 FileDB."""
+    return FileDB(tmp_path / "db")
 
 
 class TestDailyPipeline:
     """Daily 파이프라인 통합 테스트."""
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_success(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """정상 실행 시 모든 단계를 거친다."""
         mock_gnews = MagicMock()
@@ -91,33 +91,20 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_abc123"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_123"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
         mock_gnews.fetch_articles.assert_called_once()
         mock_claude.generate_daily.assert_called_once()
         mock_gmail.send_email.assert_called_once()
-        mock_drive.create_document.assert_called_once()
-        mock_nlm.save_sources.assert_called_once()
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_logs_success(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """성공 시 newsletter_log에 success로 기록한다."""
         mock_gnews = MagicMock()
@@ -133,18 +120,10 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_abc"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_abc"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["status"] == "success"
 
     @patch("main.GNewsService")
@@ -157,20 +136,17 @@ class TestDailyPipeline:
 
         run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[0]["status"] == "failed"
         assert "GNews" in records[0]["error_message"]
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_claude_failure_fallback(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """Claude 실패 시 기사 목록만으로 이메일을 발송한다 (PRD 10)."""
         mock_gnews = MagicMock()
@@ -186,29 +162,18 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_fallback"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_fallback"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
         mock_gmail.send_email.assert_called_once()
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_gmail_failure(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """Gmail 실패 시 failed로 기록하고 Drive/NLM은 건너뛴다."""
         mock_gnews = MagicMock()
@@ -224,20 +189,11 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
+        records = db_conn.table("newsletter_log").rows()
         assert records[-1]["status"] == "failed"
-
-        mock_drive.create_document.assert_not_called()
-        mock_nlm.save_sources.assert_not_called()
 
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
@@ -256,16 +212,7 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        with patch("main._save_local_backup"), \
-             patch("main.DriveService") as mock_drive_cls, \
-             patch("main.NotebookLMService") as mock_nlm_cls:
-            mock_drive = MagicMock()
-            mock_drive.create_document.return_value = "doc_empty"
-            mock_drive_cls.return_value = mock_drive
-
-            mock_nlm = MagicMock()
-            mock_nlm_cls.return_value = mock_nlm
-
+        with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
         mock_gmail.send_email.assert_called_once()
@@ -273,16 +220,13 @@ class TestDailyPipeline:
         html_body = call_args[0][2]
         assert "해당 기간" in html_body or "동향 없음" in html_body
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_archives_articles(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """발송 후 기사를 아카이브에 저장한다."""
         mock_gnews = MagicMock()
@@ -298,30 +242,19 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_arch"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_arch"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("article_archive").get_all_records()
+        records = db_conn.table("article_archive").rows()
         assert len(records) == 2
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_inserts_articles_to_db(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """수집된 기사를 daily_articles 시트에 삽입한다."""
         mock_gnews = MagicMock()
@@ -337,30 +270,19 @@ class TestDailyPipeline:
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_ins"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_ins"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 2
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
     def test_daily_pipeline_correct_recipients(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth, db_conn
     ):
         """config의 daily 수신자에게 발송한다."""
         mock_gnews = MagicMock()
@@ -375,14 +297,6 @@ class TestDailyPipeline:
         mock_gmail.send_email.return_value = {"id": "msg_123"}
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
-
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_recip"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_recip"
-        mock_nlm_cls.return_value = mock_nlm
 
         with patch("main._save_local_backup"):
             run_daily_pipeline(SAMPLE_CONFIG, db_conn)
@@ -405,7 +319,7 @@ class TestFetchOnly:
 
         run_fetch_only(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 2
 
     @patch("main.GNewsService")
@@ -418,7 +332,7 @@ class TestFetchOnly:
 
         run_fetch_only(SAMPLE_CONFIG, db_conn)
 
-        records = db_conn.worksheet("daily_articles").get_all_records()
+        records = db_conn.table("daily_articles").rows()
         assert len(records) == 0
 
     @patch("main.GNewsService")
@@ -481,21 +395,76 @@ class TestSaveLocalBackup:
         assert filepath.exists()
 
 
-class TestDriveIntegration:
-    """Daily 파이프라인 — Drive 연동 테스트 (Phase 5)."""
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
+# ── Phase 1 (2026-05-14): A → A' news_mode 분기 ──
+
+SAMPLE_INDUSTRY_SCAN_CONFIG = {
+    **SAMPLE_CONFIG,
+    "features": {
+        "news_mode": "industry_scan",
+        "news_mode_fallback_on_failure": True,
+    },
+}
+
+SAMPLE_ASCAN_MARKDOWN = """\
+## 1. 개요
+
+**SW 산업 동향 — A' 본문**
+[Reuters](https://reuters.com/x) 외 다수.
+"""
+
+
+class TestIndustryScanMode:
+    """news_mode='industry_scan' 분기 (A' 운영 교체) 테스트."""
+
+    @patch("main.get_google_credentials")
+    @patch("main.GmailService")
+    @patch("main.IndustryScanService")
+    def test_a_prime_happy_path(
+        self, mock_scan_cls, mock_gmail_cls, mock_auth, db_conn
+    ):
+        """A' 성공 시 GNews 분기 진입 없이 발송까지."""
+        mock_scan = MagicMock()
+        mock_scan.generate.return_value = SAMPLE_ASCAN_MARKDOWN
+        mock_scan_cls.return_value = mock_scan
+
+        mock_gmail = MagicMock()
+        mock_gmail_cls.return_value = mock_gmail
+        mock_auth.return_value = MagicMock()
+
+        with patch("main._save_local_backup"), \
+             patch("main.GNewsService") as mock_gnews_cls, \
+             patch("main.ClaudeService") as mock_claude_cls:
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
+            mock_gnews_cls.assert_not_called()
+            mock_claude_cls.assert_not_called()
+
+        mock_scan.generate.assert_called_once()
+        mock_gmail.send_email.assert_called_once()
+
+        # A' 기사가 daily_articles에 삽입되었는지 검증
+        rows = db_conn.table("daily_articles").rows()
+        assert len(rows) == 1
+        assert rows[0]["url"] == "https://reuters.com/x"
+        assert rows[0]["source_name"] == "reuters.com"
+
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
     @patch("main.ClaudeService")
     @patch("main.GNewsService")
+    @patch("main.IndustryScanService")
     @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
-    def test_drive_doc_id_saved_to_log(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+    def test_a_prime_failure_falls_back_to_gnews(
+        self, mock_scan_cls, mock_gnews_cls, mock_claude_cls,
+        mock_gmail_cls, mock_auth, db_conn
     ):
-        """Drive 문서 ID가 newsletter_log에 기록된다."""
+        """A' 실패 + fallback=true 시 GNews 분기로 전환."""
+        from src.industry_scan_service import IndustryScanError
+
+        mock_scan = MagicMock()
+        mock_scan.generate.side_effect = IndustryScanError("MCP 연결 실패")
+        mock_scan_cls.return_value = mock_scan
+
         mock_gnews = MagicMock()
         mock_gnews.fetch_articles.return_value = SAMPLE_ARTICLES
         mock_gnews_cls.return_value = mock_gnews
@@ -505,96 +474,74 @@ class TestDriveIntegration:
         mock_claude_cls.return_value = mock_claude
 
         mock_gmail = MagicMock()
-        mock_gmail.send_email.return_value = {"id": "msg_123"}
         mock_gmail_cls.return_value = mock_gmail
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_phase5"
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_phase5"
-        mock_nlm_cls.return_value = mock_nlm
-
         with patch("main._save_local_backup"):
-            run_daily_pipeline(SAMPLE_CONFIG, db_conn)
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
-        assert records[-1]["drive_doc_id"] == "doc_phase5"
+        mock_scan.generate.assert_called_once()
+        mock_gnews.fetch_articles.assert_called_once()
+        mock_claude.generate_daily.assert_called_once()
+        mock_gmail.send_email.assert_called_once()
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
-    @patch("main.ClaudeService")
     @patch("main.GNewsService")
-    @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
-    def test_drive_failure_does_not_break_pipeline(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+    @patch("main.IndustryScanService")
+    def test_a_prime_failure_no_fallback_skips_send(
+        self, mock_scan_cls, mock_gnews_cls, mock_gmail_cls, mock_auth, db_conn
     ):
-        """Drive 저장 실패 시에도 파이프라인은 계속 진행한다 (PRD 10)."""
-        mock_gnews = MagicMock()
-        mock_gnews.fetch_articles.return_value = SAMPLE_ARTICLES
-        mock_gnews_cls.return_value = mock_gnews
+        """A' 실패 + fallback=false 시 발송 스킵, GNews 진입 안 함."""
+        from src.industry_scan_service import IndustryScanError
 
-        mock_claude = MagicMock()
-        mock_claude.generate_daily.return_value = SAMPLE_MARKDOWN
-        mock_claude_cls.return_value = mock_claude
+        cfg = {
+            **SAMPLE_CONFIG,
+            "features": {
+                "news_mode": "industry_scan",
+                "news_mode_fallback_on_failure": False,
+            },
+        }
+        mock_scan = MagicMock()
+        mock_scan.generate.side_effect = IndustryScanError("max_iter 도달")
+        mock_scan_cls.return_value = mock_scan
 
         mock_gmail = MagicMock()
-        mock_gmail.send_email.return_value = {"id": "msg_123"}
         mock_gmail_cls.return_value = mock_gmail
-        mock_auth.return_value = MagicMock()
-
-        mock_drive = MagicMock()
-        mock_drive.create_document.side_effect = Exception("Drive quota exceeded")
-        mock_drive_cls.return_value = mock_drive
-
-        mock_nlm = MagicMock()
-        mock_nlm.save_sources.return_value = "nb_ok"
-        mock_nlm_cls.return_value = mock_nlm
 
         with patch("main._save_local_backup"):
-            run_daily_pipeline(SAMPLE_CONFIG, db_conn)
+            run_daily_pipeline(cfg, db_conn)
 
-        records = db_conn.worksheet("newsletter_log").get_all_records()
-        assert records[-1]["status"] == "success"
-        assert records[-1]["drive_doc_id"] == ""
+        mock_gmail.send_email.assert_not_called()
+        mock_gnews_cls.assert_not_called()
 
-    @patch("main.NotebookLMService")
-    @patch("main.DriveService")
     @patch("main.get_google_credentials")
     @patch("main.GmailService")
-    @patch("main.ClaudeService")
-    @patch("main.GNewsService")
-    @patch.dict("os.environ", {"GNEWS_API_KEY": "test_key", "CLAUDE_API_KEY": "test_claude"})
-    def test_drive_skipped_when_gmail_failed(
-        self, mock_gnews_cls, mock_claude_cls, mock_gmail_cls, mock_auth,
-        mock_drive_cls, mock_nlm_cls, db_conn
+    @patch("main.IndustryScanService")
+    def test_a_prime_archive_extracts_urls(
+        self, mock_scan_cls, mock_gmail_cls, mock_auth, db_conn
     ):
-        """Gmail 실패 시 Drive는 호출되지 않는다."""
-        mock_gnews = MagicMock()
-        mock_gnews.fetch_articles.return_value = SAMPLE_ARTICLES
-        mock_gnews_cls.return_value = mock_gnews
+        """A' 모드에서 본문 마크다운 인용 URL이 archive_articles로 전달되는지."""
+        markdown = (
+            "## 1. 개요\n\n"
+            "[Reuters 보도](https://reuters.com/a) 외 "
+            "[Bloomberg](https://bloomberg.com/b) 참고.\n"
+        )
+        mock_scan = MagicMock()
+        mock_scan.generate.return_value = markdown
+        mock_scan_cls.return_value = mock_scan
 
-        mock_claude = MagicMock()
-        mock_claude.generate_daily.return_value = SAMPLE_MARKDOWN
-        mock_claude_cls.return_value = mock_claude
-
-        mock_gmail = MagicMock()
-        mock_gmail.send_email.side_effect = Exception("Gmail auth failed")
-        mock_gmail_cls.return_value = mock_gmail
+        mock_gmail_cls.return_value = MagicMock()
         mock_auth.return_value = MagicMock()
 
-        mock_drive = MagicMock()
-        mock_drive_cls.return_value = mock_drive
+        with patch("main._save_local_backup"), \
+             patch("main.archive_articles") as mock_archive:
+            run_daily_pipeline(SAMPLE_INDUSTRY_SCAN_CONFIG, db_conn)
 
-        mock_nlm = MagicMock()
-        mock_nlm_cls.return_value = mock_nlm
-
-        with patch("main._save_local_backup"):
-            run_daily_pipeline(SAMPLE_CONFIG, db_conn)
-
-        mock_drive.create_document.assert_not_called()
+        mock_archive.assert_called_once()
+        # 4번째 positional 인자가 archive_rows
+        call_args = mock_archive.call_args
+        rows = call_args.args[3] if len(call_args.args) > 3 else call_args.kwargs.get("articles_list")
+        urls = {r["url"] for r in rows}
+        assert "https://reuters.com/a" in urls
+        assert "https://bloomberg.com/b" in urls

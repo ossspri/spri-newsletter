@@ -1,0 +1,14 @@
+id,sent_at,type,article_count,recipient_count,status,error_message,drive_doc_id,nlm_notebook
+202605100818129743,2026-05-10T08:18:12,daily,15,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605110645391527,2026-05-11T06:45:39,daily,11,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605120655429531,2026-05-12T06:55:42,daily,25,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605130716172074,2026-05-13T07:16:17,daily,25,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605131610005180,2026-05-13T16:10:00,weekly,0,1,success,,1EQnKGwKIxxxvAQwGiK_-RSb9M0CDf7LEL0pDjhIMKVs,
+202605140702181485,2026-05-14T07:02:18,daily,25,7,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605141512077873,2026-05-14T15:12:07,weekly,0,1,success,,13JwdSa_FPe_JHrR8_2IRzKyNt546BN_u8vaeh6HZs8M,
+202605142354513118,2026-05-14T23:54:51,daily,0,1,success,,1U0tLXp8goWu3LD40aZBTJeA1x4QiJYKcLqRh6J9On3I,
+202605150730055347,2026-05-15T07:30:05,daily,0,0,failed,"git_sync pull 실패: git pull --rebase 실패 (충돌 가능, 발송 차단): error: cannot pull with rebase: You have unstaged changes.
+error: Please commit or stash them."
+202605150800057486,2026-05-15T08:00:05,daily,0,0,failed,"git_sync pull 실패: git pull --rebase 실패 (충돌 가능, 발송 차단): error: cannot pull with rebase: You have unstaged changes.
+error: Please commit or stash them."
+202605150828172711,2026-05-15T08:28:17,daily,0,7,success,

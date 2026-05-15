@@ -41,7 +41,7 @@ SAMPLE_CONFIG = {
             "AI regulation policy",
         ],
         "lang": "en",
-        "max_per_query": 50,
+        "max_per_query": 25,
     },
     "newsletter": {"max_articles": 25},
 }

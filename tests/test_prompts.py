@@ -3,8 +3,11 @@ import pytest
 
 from src.prompts import (
     build_daily_prompt,
+    build_focus_prompt,
+    build_postprocess_prompt,
     build_weekly_prompt,
     format_articles_for_prompt,
+    format_reports_for_prompt,
 )
 
 
@@ -120,3 +123,160 @@ class TestBuildWeeklyPrompt:
         prompt = build_weekly_prompt("articles", "")
         assert "## 1. 개요" in prompt
         assert "## 6. 하드웨어/인프라" in prompt
+
+
+class TestBuildPostprocessPrompt:
+    def test_raw_report_injected(self):
+        prompt = build_postprocess_prompt("RAW_REPORT_CONTENT_HERE")
+        assert "RAW_REPORT_CONTENT_HERE" in prompt
+
+    def test_six_sections_mentioned(self):
+        prompt = build_postprocess_prompt("body")
+        assert "## 1. 개요" in prompt
+        assert "## 2. 정책/법제" in prompt
+        assert "## 3. 기업/산업" in prompt
+        assert "## 4. 인력/교육" in prompt
+        assert "## 5. 기술/연구" in prompt
+        assert "## 6. 하드웨어/인프라" in prompt
+
+    def test_postprocess_role(self):
+        prompt = build_postprocess_prompt("body")
+        # 후처리 역할 명시 (편집/재구성)
+        assert "재구성" in prompt or "압축" in prompt
+
+    def test_3_element_analysis(self):
+        prompt = build_postprocess_prompt("body")
+        # build_daily_prompt와 일관된 3요소 분석 의무
+        assert "사실" in prompt
+        assert "맥락" in prompt
+        assert "함의" in prompt
+
+    def test_no_length_target(self):
+        prompt = build_postprocess_prompt("body")
+        # 분량 목표 제거 검증 — 8000/10000 같은 압축 숫자가 없어야 함
+        assert "8,000" not in prompt and "8000" not in prompt
+        assert "10,000" not in prompt and "10000" not in prompt
+        # "분량 목표 없음" 또는 "길어져도 무방" 같은 명시 표현
+        assert "분량 목표 없음" in prompt or "길어져도" in prompt
+
+    def test_strict_source_preservation(self):
+        prompt = build_postprocess_prompt("body")
+        # 출처 100% 보존 강제 표현
+        assert "100%" in prompt
+        assert "한 건도 빠짐없이" in prompt
+        assert "명백한 실패" in prompt
+
+    def test_self_verification_instruction(self):
+        prompt = build_postprocess_prompt("body")
+        # 출력 전 자체 검증 지시
+        assert "자체 검증" in prompt or "최종 출력" in prompt
+        # 출처 개수 비교 지시
+        assert "개수" in prompt
+
+    def test_forbid_deep_headers(self):
+        prompt = build_postprocess_prompt("body")
+        # 4단계 이상 헤더 금지 명시 (구조/가독성 개선의 핵심)
+        assert "####" in prompt or "3단계 이상 헤더" in prompt or "4단계 이상" in prompt
+
+    def test_appendix_removal(self):
+        prompt = build_postprocess_prompt("body")
+        # 부록·메타정보 제거 명시
+        assert "부록" in prompt
+
+    def test_no_existing_summaries_arg(self):
+        # build_daily_prompt와 달리 existing_summaries 인자 없음
+        # → 시그니처 검증: 인자 1개만 받음
+        import inspect
+        sig = inspect.signature(build_postprocess_prompt)
+        assert len(sig.parameters) == 1
+        assert "raw_report" in sig.parameters
+
+    def test_input_report_tag(self):
+        prompt = build_postprocess_prompt("INNER_BODY")
+        # 입력이 <input_report> 태그로 감싸져 들어가는지
+        assert "<input_report>" in prompt
+        assert "INNER_BODY" in prompt
+
+    def test_only_report_body_output(self):
+        prompt = build_postprocess_prompt("body")
+        # 부가 안내문 금지 (build_daily_prompt와 일관)
+        assert "리포트 본문 외에" in prompt or "다른 텍스트" in prompt or "안내 문구를 포함하지" in prompt
+
+
+# ── PR3: 수동 보고서 reports 인자 ──
+
+
+SAMPLE_REPORTS = [
+    {
+        "title": "IBM AI Index 2026",
+        "url": "https://example.com/ibm-ai-index",
+        "summary": "76% of enterprises have appointed CAIO, up from 26% in 2025.",
+        "head_excerpt": "Chapter 1: Executive Summary...",
+        "original_filename": "",
+    },
+    {
+        "title": "MSFT Q3 FY2026 Earnings",
+        "url": "",
+        "summary": "Cloud+AI revenue $37B, +123% YoY.",
+        "head_excerpt": "Highlights and forward-looking statements...",
+        "original_filename": "msft_q3.pdf",
+    },
+]
+
+
+class TestFormatReportsForPrompt:
+    def test_empty_returns_empty_string(self):
+        assert format_reports_for_prompt([]) == ""
+        assert format_reports_for_prompt(None) == ""
+
+    def test_includes_title_and_summary(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS)
+        assert "[보고서 1] IBM AI Index 2026" in out
+        assert "76% of enterprises" in out
+
+    def test_includes_excerpt(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS)
+        assert "Chapter 1: Executive Summary" in out
+
+    def test_url_source_for_url_report(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS[:1])
+        assert "https://example.com/ibm-ai-index" in out
+
+    def test_pdf_upload_source_label(self):
+        out = format_reports_for_prompt(SAMPLE_REPORTS[1:])
+        assert "PDF 업로드" in out
+        assert "msft_q3.pdf" in out
+
+    def test_excerpt_truncation(self):
+        long_excerpt = "X" * 10000
+        reports = [{"title": "t", "url": "", "summary": "s",
+                    "head_excerpt": long_excerpt}]
+        out = format_reports_for_prompt(reports, max_excerpt_chars=500)
+        # 500자 한도 — X 시퀀스가 정확히 500자만 포함
+        assert out.count("X") == 500
+
+
+class TestBuildFocusPromptWithReports:
+    def test_no_reports_preserves_legacy_output(self):
+        prompt_no = build_focus_prompt("articles_text", "past")
+        prompt_none = build_focus_prompt("articles_text", "past", reports=None)
+        # None과 인자 미지정은 동일
+        assert prompt_no == prompt_none
+        # 보고서 데이터 흔적이 없음
+        assert "[보고서 1]" not in prompt_no
+        assert "1차 자료(연구보고서/백서/회사 발표)입니다" not in prompt_no
+
+    def test_with_reports_inserts_reports_block(self):
+        prompt = build_focus_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        assert "[보고서 1] IBM AI Index 2026" in prompt
+        assert "76% of enterprises" in prompt
+        assert "1차 자료(연구보고서/백서/회사 발표)입니다" in prompt
+
+    def test_citation_format_guidance_present(self):
+        prompt = build_focus_prompt("articles", "past", reports=SAMPLE_REPORTS)
+        # constraint #7 가이드 (literal {title}로 출력됨)
+        assert "* 보고서: {title}" in prompt
+
+    def test_articles_still_present(self):
+        prompt = build_focus_prompt("ARTICLES_MARKER", "past", reports=SAMPLE_REPORTS)
+        assert "ARTICLES_MARKER" in prompt

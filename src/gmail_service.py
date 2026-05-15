@@ -80,3 +80,41 @@ class GmailService:
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html", "utf-8"))
         return msg
+
+    def search_sent_today(self, newsletter_type: str, date_str: str) -> bool:
+        """오늘자 동일 제목 메일이 Gmail Sent에 이미 있는지 확인한다.
+
+        멀티 PC 환경에서 ``check_today_sent`` 의 진실의 원천. 로컬 CSV는 PC 간
+        drift할 수 있지만 Gmail Sent는 공유 계정 기준 단일 source.
+
+        쿼리: ``from:me subject:"<예상 제목>" newer_than:2d``
+          - ``from:me``: 인증된 계정이 보낸 것만 (공유 계정에서 다른 멤버가 보낸
+            무관한 메일을 false positive로 잡지 않게 함)
+          - subject: ``build_email_subject``의 정확한 prefix + 날짜 매칭
+          - ``newer_than:2d``: 검색 범위 한정용 (제목에 날짜가 있어
+            오래된 같은 날짜 메일을 잡을 일은 사실상 없음)
+
+        Args:
+            newsletter_type: 'daily' | 'weekly'
+            date_str: 'YYYY-MM-DD' (KST 기준 오늘 날짜)
+
+        Returns:
+            동일 제목 메일이 1건 이상이면 True.
+        """
+        # 순환 import 방지 위해 함수 내 import.
+        from src.email_template import build_email_subject
+
+        subject = build_email_subject(newsletter_type, date_str)
+        query = f'from:me subject:"{subject}" newer_than:2d'
+
+        result = (
+            self.service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=1)
+            .execute()
+        )
+        found = bool(result.get("messages"))
+        logger.debug(
+            "Gmail Sent dedup 검색: query=%s, found=%s", query, found
+        )
+        return found

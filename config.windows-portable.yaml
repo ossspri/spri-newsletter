@@ -1,0 +1,112 @@
+# SPRi Newsletter — Windows Portable(동료 PC) 변종 설정
+#
+# 본 파일은 메인 config.yaml 을 대체하는 "동료 PC 기본값" 입니다.
+# 메인 운영자의 config.yaml 은 손대지 않고, 동료 zip 패키지에서
+# 환경변수 SPRI_CONFIG=config.windows-portable.yaml 로 지정하여 사용합니다.
+#
+# 차이점 요약:
+#   - features.news_mode: "gnews"  (prism 미설치 환경 가정, A' 비활성)
+#   - features.news_mode_fallback_on_failure: true
+#   - features.git_autosync: false  (사내 git remote 미설정 가정)
+#   - features.gmail_dedup: true     (Gmail Sent 가 진실의 원천 — 유지)
+#   - recipients.daily/weekly/focus: 빈 리스트 (동료가 직접 입력)
+
+# ── 뉴스 수집 ──
+gnews:
+  queries:
+    - '"big tech earnings"'
+    - '"enterprise software"'
+    - '"SaaS company"'
+    - '"AI regulation"'
+    - '"AI startup funding"'
+    - '"generative AI" enterprise'
+    - '"AI chip" OR "AI semiconductor"'
+    - '"AI datacenter"'
+    - '"tech IPO" OR "software acquisition"'
+  lang: "en"
+  search_in: "title,description"
+  max_per_query: 100
+  source_whitelist:
+    - "Reuters"
+    - "Bloomberg"
+    - "Bnn Bloomberg"
+    - "CNBC"
+    - "Seeking Alpha"
+    - "Benzinga"
+    - "MarketScreener"
+    - "Investor's Business Daily"
+    - "Business Insider"
+    - "Forbes"
+    - "Fortune"
+    - "TechCrunch"
+    - "TNW"
+    - "TechStartups.com"
+    - "iTWire"
+    - "The Economic Times"
+    - "Livemint"
+    - "The Hindu Business Line"
+    - "The Financial Express"
+    - "NDTV Profit"
+    - "CNBC TV18"
+    - "Moneycontrol"
+  min_articles: 10
+  fallback_queries:
+    - "OpenAI"
+    - "Microsoft AI"
+    - "Google Cloud"
+    - "Amazon AWS"
+    - "Salesforce"
+    - "Oracle cloud"
+    - "NVIDIA AI"
+    - "Snowflake OR Databricks"
+    - "Meta AI"
+    - "Adobe AI"
+    - "ServiceNow"
+
+# ── 뉴스레터 ──
+newsletter:
+  max_articles: 25
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 16000
+
+# ── 이메일 수신자 ──
+# 동료 PC 기본값: 모두 빈 리스트. 동료가 직접 자기 수신자 입력 필요.
+# Focus 발송 시 recipients.focus 가 비어 있으면 ValueError 가 발생하므로
+# 키 자체는 정의해 두고(빈 리스트), 첫 사용 시 README/UI 안내를 따른다.
+recipients:
+  daily: []
+  weekly: []
+  focus: []
+
+# ── 웹 UI ──
+web_ui:
+  host: "127.0.0.1"
+  port: 5000
+
+# ── Feature flags ──
+features:
+  # Gmail Sent dedup 활성 (멀티 PC 안전. 단일 PC 환경에서도 무해).
+  gmail_dedup: true
+  # 동료 PC 는 사내 git remote 미설정 가정 → autosync OFF.
+  # 추후 사내 git 권한이 확보되면 true 로 변경 가능.
+  git_autosync: false
+  # 실제 git 명령 없이 로그만 (배포 전 검증용).
+  git_autosync_dry_run: false
+  # 동료 PC 는 prism repo 미설치 → GNews(A) 모드 고정.
+  news_mode: "gnews"
+  # A' 가 실패해도 GNews 로 자동 폴백 (현재 기본값 gnews 라 큰 영향 없음).
+  news_mode_fallback_on_failure: true
+  # 동료 PC 배포본은 true 로 두면 Daily/Weekly 메뉴가 숨겨지고
+  # Focus 메뉴만 노출된다. 기본값 false (메인 PC).
+  focus_menu_only: true
+
+# ── A'(industry-scan) 설정 ──
+# 동료 PC 에서는 사용되지 않지만 키 정의를 유지 (코드 호환).
+industry_scan:
+  max_iter: 35
+  skill_path: null
+
+# ── 로깅 ──
+logging:
+  level: "INFO"
+  file: "logs/spri.log"

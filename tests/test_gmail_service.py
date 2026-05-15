@@ -184,3 +184,65 @@ class TestBuildMimeMessage:
         # decode해서 한국어가 포함되어 있는지 확인
         decoded = payload[0].get_payload(decode=True).decode("utf-8")
         assert "소프트웨어정책연구소" in decoded
+
+
+# ── Gmail Sent dedup 검색 ──
+
+class TestSearchSentToday:
+    """``search_sent_today`` 단위 테스트 — PR#2 dedup 위임 진입점."""
+
+    def _make_gmail_with_messages(self, mock_build, messages: list):
+        mock_service = MagicMock()
+        mock_list = MagicMock()
+        mock_list.execute.return_value = {"messages": messages} if messages else {}
+        mock_service.users.return_value.messages.return_value.list.return_value = mock_list
+        mock_build.return_value = mock_service
+        return mock_service
+
+    @patch("src.gmail_service.build")
+    def test_returns_true_when_match_found(self, mock_build, mock_credentials):
+        """오늘자 동일 제목 메일이 1건 이상이면 True."""
+        self._make_gmail_with_messages(mock_build, [{"id": "m1"}])
+        gmail = GmailService(mock_credentials)
+        assert gmail.search_sent_today("daily", "2026-05-08") is True
+
+    @patch("src.gmail_service.build")
+    def test_returns_false_when_no_match(self, mock_build, mock_credentials):
+        """매칭 메일이 없으면 False."""
+        self._make_gmail_with_messages(mock_build, [])
+        gmail = GmailService(mock_credentials)
+        assert gmail.search_sent_today("daily", "2026-05-08") is False
+
+    @patch("src.gmail_service.build")
+    def test_query_uses_from_me_and_exact_subject(self, mock_build, mock_credentials):
+        """query에 ``from:me`` + ``build_email_subject`` 결과가 정확히 들어간다."""
+        mock_service = self._make_gmail_with_messages(mock_build, [])
+        gmail = GmailService(mock_credentials)
+        gmail.search_sent_today("daily", "2026-05-08")
+
+        list_call = mock_service.users().messages().list
+        kwargs = list_call.call_args.kwargs
+        q = kwargs["q"]
+        assert "from:me" in q
+        assert '[Daily] 글로벌 SW산업동향 (2026-05-08)' in q
+
+    @patch("src.gmail_service.build")
+    def test_query_for_weekly_uses_weekly_prefix(self, mock_build, mock_credentials):
+        """Weekly 타입은 다른 제목 prefix로 검색한다."""
+        mock_service = self._make_gmail_with_messages(mock_build, [])
+        gmail = GmailService(mock_credentials)
+        gmail.search_sent_today("weekly", "2026-05-08")
+
+        q = mock_service.users().messages().list.call_args.kwargs["q"]
+        assert "[Weekly]" in q
+        assert "주간동향" in q
+
+    @patch("src.gmail_service.build")
+    def test_api_error_propagates(self, mock_build, mock_credentials):
+        """API 호출 실패는 그대로 전파 (호출자에서 fallback 처리)."""
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.side_effect = Exception("API down")
+        mock_build.return_value = mock_service
+        gmail = GmailService(mock_credentials)
+        with pytest.raises(Exception, match="API down"):
+            gmail.search_sent_today("daily", "2026-05-08")

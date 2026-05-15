@@ -12,6 +12,7 @@ import anthropic
 from src.prompts import (
     build_daily_prompt,
     build_weekly_prompt,
+    build_focus_prompt,
     format_articles_for_prompt,
 )
 from src.utils import retry
@@ -45,16 +46,165 @@ class ClaudeService:
         logger.info("Daily 뉴스레터 생성 완료 (%d자)", len(result))
         return result
 
-    def generate_weekly(self, articles: list[dict], existing_summaries: str = "") -> str:
-        """Weekly 보고서 마크다운을 생성한다."""
+    def generate_weekly(
+        self,
+        articles: list[dict],
+        existing_summaries: str = "",
+    ) -> str:
+        """Weekly 표준 주간 보고서 마크다운을 생성한다.
+
+        2026-05-15 Focus 분리: 수동 보고서·전문가 인사이트는 ``generate_focus``
+        가 담당. Weekly는 자동 수집 기사만 사용하는 단순 모드.
+
+        Args:
+            articles: 자동 수집된 daily 기사 7일치 list.
+            existing_summaries: 과거 발송 기사 제목 (중복 배제).
+        """
         article_text = format_articles_for_prompt(articles)
         prompt = build_weekly_prompt(article_text, existing_summaries)
 
-        logger.info("Weekly 보고서 생성 시작 (기사 %d건, 모델: %s)", len(articles), self.model)
+        logger.info(
+            "Weekly 보고서 생성 시작 (기사 %d건, 모델: %s)",
+            len(articles), self.model,
+        )
         raw = self._call_api(prompt)
         result = self._postprocess(raw)
         logger.info("Weekly 보고서 생성 완료 (%d자)", len(result))
         return result
+
+    def generate_focus(
+        self,
+        articles: list[dict],
+        existing_summaries: str = "",
+        reports: list[dict] | None = None,
+        expert_insight: str = "",
+    ) -> str:
+        """Focus 큐레이션 보고서 마크다운을 생성한다.
+
+        Args:
+            articles: 자동 수집 기사 + 수동 추가 기사 혼합 list.
+            existing_summaries: 과거 발송 기사 제목 (중복 배제).
+            reports: 수동 첨부 1차 자료. None/빈 list면 기존 동작.
+                안전 한도: 상위 5건까지만 prompt에 주입 (토큰 폭증 방지).
+            expert_insight: 사용자가 입력한 금주 핵심 인사이트.
+                LLM이 이를 반영해 관련 기사·보고서 요약을 증강.
+        """
+        article_text = format_articles_for_prompt(articles)
+        trimmed_reports = (reports or [])[:5]
+        prompt = build_focus_prompt(
+            article_text, existing_summaries,
+            reports=trimmed_reports or None,
+            expert_insight=expert_insight or "",
+        )
+
+        logger.info(
+            "Focus 보고서 생성 시작 (기사 %d건, 보고서 %d건, 인사이트 %d자, 모델: %s)",
+            len(articles), len(trimmed_reports), len(expert_insight or ""), self.model,
+        )
+        raw = self._call_api(prompt)
+        result = self._postprocess(raw)
+        logger.info("Focus 보고서 생성 완료 (%d자)", len(result))
+        return result
+
+    def summarize_report_text(
+        self,
+        full_text: str,
+        max_chars: int = 1500,
+    ) -> str:
+        """수동 첨부 보고서의 전문을 1차 요약한다 (Weekly prompt 주입용).
+
+        용도: PR2 — Weekly '수동 보고서 추가' 흐름에서 사용자가 첨부한 PDF/HTML
+        보고서의 전문(수만자)을 그대로 Weekly 생성 프롬프트에 넣으면 토큰
+        폭발이 일어남. 본 메서드로 1000~1500자 정도의 한국어 요약을 만들어
+        prompt에 ``<reports>`` 블록 안에 주입한다.
+
+        Args:
+            full_text: pdfplumber/HTML 본문에서 추출한 전문.
+            max_chars: 결과 요약의 대략 목표 길이 (모델에 가이드만 줌).
+
+        Returns:
+            한국어 요약 문자열. 실패 시 빈 문자열 (호출자가 fallback 처리).
+            전문이 너무 짧으면 그대로 또는 살짝 정리한 형태로 반환.
+        """
+        if not full_text or not full_text.strip():
+            return ""
+
+        # 본문이 충분히 짧으면 요약 불필요
+        if len(full_text) <= max_chars:
+            return full_text.strip()
+
+        prompt = (
+            "다음은 1차 자료(연구보고서/백서/회사 발표)의 전문입니다. "
+            "SPRi 주간 SW 산업 동향 보고서에 인용할 수 있도록 한국어로 "
+            f"약 {max_chars}자 이내로 요약해주세요.\n\n"
+            "요약 작성 지침:\n"
+            "1. 핵심 수치·인용·구체적 사실을 우선 포함 (예: '76% of enterprises...').\n"
+            "2. 보고서 발행 주체와 발표 시점을 명시.\n"
+            "3. SW 산업·정책·기업 동향과 연관 있는 부분 우선.\n"
+            "4. 일반론은 생략, 통계와 사례 위주.\n"
+            "5. 요약 본문만 출력하고 부가 설명은 금지.\n\n"
+            "<report_text>\n"
+            f"{full_text}\n"
+            "</report_text>"
+        )
+
+        try:
+            raw = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            ).content[0].text
+            summary = (raw or "").strip()
+            logger.info("보고서 요약 완료 (%d자 → %d자)", len(full_text), len(summary))
+            return summary
+        except Exception as e:
+            logger.warning("보고서 요약 실패, 빈 문자열 반환: %s", e)
+            return ""
+
+    def translate_articles(self, articles: list[dict]) -> list[dict]:
+        """기사 제목과 설명을 한국어로 번역한다."""
+        if not articles:
+            return articles
+
+        lines = []
+        for i, a in enumerate(articles):
+            lines.append(f"[{i}] TITLE: {a['title']}")
+            lines.append(f"[{i}] DESC: {a.get('description', '')}")
+
+        prompt = (
+            "아래 뉴스 기사의 제목(TITLE)과 설명(DESC)을 한국어로 번역해주세요.\n"
+            "반드시 동일한 형식([번호] TITLE: ... / [번호] DESC: ...)으로 출력하세요.\n"
+            "이미 한국어인 항목은 그대로 유지하세요.\n"
+            "번역만 출력하고 다른 설명은 하지 마세요.\n\n"
+            + "\n".join(lines)
+        )
+
+        try:
+            raw = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            ).content[0].text
+
+            translated = list(articles)  # shallow copy
+            for line in raw.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r"\[(\d+)\]\s*(TITLE|DESC):\s*(.*)", line)
+                if m:
+                    idx, field, value = int(m.group(1)), m.group(2), m.group(3).strip()
+                    if 0 <= idx < len(translated):
+                        if translated[idx] is articles[idx]:
+                            translated[idx] = dict(articles[idx])
+                        if field == "TITLE":
+                            translated[idx]["title"] = value
+                        else:
+                            translated[idx]["description"] = value
+            return translated
+        except Exception as e:
+            logger.warning("기사 번역 실패, 원문 반환: %s", e)
+            return articles
 
     @retry(max_retries=3, delay=30)
     def _call_api(self, prompt: str) -> str:

@@ -1,12 +1,20 @@
 """tests/test_web_ui.py — 웹 UI Flask 앱 테스트 (Phase 6)"""
+import io
 import json
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.db import insert_daily_articles, log_newsletter
+from src.db import (
+    FileDB,
+    insert_daily_articles,
+    insert_manual_article,
+    insert_manual_report,
+    log_newsletter,
+)
 from web_ui.app import create_app
-from tests.conftest import create_fake_sheets_db
+from web_ui import app as app_module
 
 
 SAMPLE_CONFIG = {
@@ -24,8 +32,6 @@ SAMPLE_CONFIG = {
         "daily": ["analyst1@spri.kr", "analyst2@spri.kr"],
         "weekly": ["director@spri.kr"],
     },
-    "drive": {"folder_id": "FAKE_FOLDER_ID"},
-    "notebooklm": {"notebook_prefix": "SPRi"},
     "web_ui": {"host": "127.0.0.1", "port": 5000},
     "logging": {"level": "INFO", "file": "logs/spri.log"},
 }
@@ -58,9 +64,9 @@ SAMPLE_MARKDOWN = """\
 
 
 @pytest.fixture
-def db_conn():
-    """인메모리 SheetsDB."""
-    return create_fake_sheets_db()
+def db_conn(tmp_path):
+    """임시 디렉토리 기반 FileDB."""
+    return FileDB(tmp_path / "db")
 
 
 @pytest.fixture
@@ -182,20 +188,20 @@ class TestDailyGenerate:
         assert data["success"] is False
 
 
-class TestDailySend:
-    """POST /daily/send 이메일 발송 테스트."""
+class TestDailyPublish:
+    """POST /daily/publish 뉴스레터 발간 테스트 (이메일 + Drive + NotebookLM)."""
 
     @patch("web_ui.app.get_google_credentials")
     @patch("web_ui.app.GmailService")
-    def test_send_success(self, mock_gmail_cls, mock_auth, client):
-        """이메일 발송 성공 시 결과를 반환한다."""
+    def test_publish_success(self, mock_gmail_cls, mock_auth, client):
+        """발간 성공 시 3단계 결과를 모두 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg123"}
         mock_gmail_cls.return_value = mock_gmail
 
         resp = client.post(
-            "/daily/send",
+            "/daily/publish",
             data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
             content_type="application/json",
         )
@@ -203,13 +209,12 @@ class TestDailySend:
 
         assert resp.status_code == 200
         assert data["success"] is True
+        assert data["results"]["email"]["success"] is True
 
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.GmailService")
-    def test_send_missing_markdown(self, mock_gmail_cls, mock_auth, client):
+    def test_publish_missing_markdown(self, client):
         """마크다운 없이 요청하면 에러를 반환한다."""
         resp = client.post(
-            "/daily/send",
+            "/daily/publish",
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -217,30 +222,6 @@ class TestDailySend:
 
         assert resp.status_code == 400
         assert data["success"] is False
-
-
-class TestDailySaveDrive:
-    """POST /daily/save-drive Google Drive 저장 테스트."""
-
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
-    def test_save_drive_success(self, mock_drive_cls, mock_auth, client):
-        """Drive 저장 성공 시 문서 ID를 반환한다."""
-        mock_auth.return_value = MagicMock()
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_abc123"
-        mock_drive_cls.return_value = mock_drive
-
-        resp = client.post(
-            "/daily/save-drive",
-            data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
-            content_type="application/json",
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["success"] is True
-        assert data["doc_id"] == "doc_abc123"
 
 
 # ── Weekly 탭 ──
@@ -263,7 +244,7 @@ class TestWeeklyPage:
 
 
 class TestWeeklyAddArticle:
-    """POST /weekly/add-article 수동 기사 추가 테스트."""
+    """POST /focus/add-article 수동 기사 추가 테스트."""
 
     @patch("web_ui.app.extract_url_metadata")
     def test_add_article_success(self, mock_extract, client):
@@ -274,7 +255,7 @@ class TestWeeklyAddArticle:
         }
 
         resp = client.post(
-            "/weekly/add-article",
+            "/focus/add-article",
             data=json.dumps({"url": "https://example.com/manual"}),
             content_type="application/json",
         )
@@ -282,11 +263,12 @@ class TestWeeklyAddArticle:
 
         assert resp.status_code == 200
         assert data["success"] is True
+        assert data["article"]["id"]
 
     def test_add_article_missing_url(self, client):
         """URL 없이 요청하면 에러를 반환한다."""
         resp = client.post(
-            "/weekly/add-article",
+            "/focus/add-article",
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -334,21 +316,80 @@ class TestWeeklyGenerate:
         assert resp.status_code == 400
         assert data["success"] is False
 
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.get_manual_report")
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_generate_passes_reports_to_claude(
+        self, mock_get_report, mock_claude_cls, client
+    ):
+        """PR3: Focus 라우트가 reports를 풀스펙으로 조회해 claude.generate_focus에 전달."""
+        mock_claude = MagicMock()
+        mock_claude.generate_focus.return_value = "## 1. 개요\nBody."
+        mock_claude_cls.return_value = mock_claude
+        mock_get_report.return_value = {
+            "id": "20260512123456",
+            "title": "IBM AI Index",
+            "url": "https://example.com/ibm",
+            "summary": "76% CAIO",
+            "text_path": "",
+            "original_filename": "",
+        }
 
-class TestWeeklySend:
-    """POST /weekly/send 이메일 발송 테스트."""
+        resp = client.post(
+            "/focus/generate",
+            data=json.dumps({
+                "articles": SAMPLE_ARTICLES,
+                "reports": [{"id": "report-20260512123456", "title": "IBM AI Index"}],
+            }),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        mock_get_report.assert_called_once()
+        call_kwargs = mock_claude.generate_focus.call_args.kwargs
+        assert "reports" in call_kwargs
+        assert call_kwargs["reports"] is not None
+        assert call_kwargs["reports"][0]["title"] == "IBM AI Index"
 
+    @patch("web_ui.app.ClaudeService")
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_generate_with_reports_only_no_articles(self, mock_claude_cls, client):
+        """기사 없이 보고서만 선택해도 진행 가능 (Focus 라우트)."""
+        with patch("web_ui.app.get_manual_report") as mock_get:
+            mock_get.return_value = {
+                "id": "r1", "title": "T", "url": "", "summary": "S",
+                "text_path": "", "original_filename": "",
+            }
+            mock_claude = MagicMock()
+            mock_claude.generate_focus.return_value = "OK"
+            mock_claude_cls.return_value = mock_claude
+
+            resp = client.post(
+                "/focus/generate",
+                data=json.dumps({
+                    "articles": [],
+                    "reports": [{"id": "report-r1", "title": "T"}],
+                }),
+                content_type="application/json",
+            )
+            assert resp.status_code == 200
+
+
+class TestWeeklyPublish:
+    """POST /weekly/publish 보고서 발간 테스트 (이메일 + Drive + NotebookLM + 로컬 백업)."""
+
+    @patch("pathlib.Path.write_text")
+    @patch("pathlib.Path.mkdir")
     @patch("web_ui.app.get_google_credentials")
     @patch("web_ui.app.GmailService")
-    def test_send_weekly_success(self, mock_gmail_cls, mock_auth, client):
-        """주간 이메일 발송 성공 시 결과를 반환한다."""
+    def test_publish_weekly_success(self, mock_gmail_cls, mock_auth, mock_mkdir, mock_write, client):
+        """발간 성공 시 전체 결과를 반환한다."""
         mock_auth.return_value = MagicMock()
         mock_gmail = MagicMock()
         mock_gmail.send_email.return_value = {"id": "msg456"}
         mock_gmail_cls.return_value = mock_gmail
 
         resp = client.post(
-            "/weekly/send",
+            "/weekly/publish",
             data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
             content_type="application/json",
         )
@@ -356,30 +397,19 @@ class TestWeeklySend:
 
         assert resp.status_code == 200
         assert data["success"] is True
+        assert data["results"]["email"]["success"] is True
 
-
-class TestWeeklySaveDrive:
-    """POST /weekly/save-drive Google Drive 저장 테스트."""
-
-    @patch("web_ui.app.get_google_credentials")
-    @patch("web_ui.app.DriveService")
-    def test_save_drive_weekly(self, mock_drive_cls, mock_auth, client):
-        """Weekly Drive 저장 성공."""
-        mock_auth.return_value = MagicMock()
-        mock_drive = MagicMock()
-        mock_drive.create_document.return_value = "doc_weekly_123"
-        mock_drive_cls.return_value = mock_drive
-
+    def test_publish_weekly_missing_markdown(self, client):
+        """마크다운 없이 요청하면 에러를 반환한다."""
         resp = client.post(
-            "/weekly/save-drive",
-            data=json.dumps({"markdown": SAMPLE_MARKDOWN}),
+            "/weekly/publish",
+            data=json.dumps({}),
             content_type="application/json",
         )
         data = json.loads(resp.data)
 
-        assert resp.status_code == 200
-        assert data["success"] is True
-        assert data["doc_id"] == "doc_weekly_123"
+        assert resp.status_code == 400
+        assert data["success"] is False
 
 
 # ── 공통 기능 ──
@@ -393,6 +423,41 @@ class TestRootRedirect:
         resp = client.get("/")
         assert resp.status_code == 302
         assert "/daily" in resp.headers["Location"]
+
+
+class TestFocusMenuOnly:
+    """features.focus_menu_only=True 동작 테스트 (동료 PC 배포본)."""
+
+    @pytest.fixture
+    def focus_only_client(self, db_conn):
+        cfg = dict(SAMPLE_CONFIG)
+        cfg["features"] = {"focus_menu_only": True}
+        application = create_app(cfg, db_conn)
+        application.config["TESTING"] = True
+        return application.test_client()
+
+    def test_root_redirects_to_focus(self, focus_only_client):
+        """focus_menu_only=True 시 / → /focus 로 리다이렉트한다."""
+        resp = focus_only_client.get("/")
+        assert resp.status_code == 302
+        assert "/focus" in resp.headers["Location"]
+
+    def test_focus_page_hides_daily_weekly_tabs(self, focus_only_client):
+        """focus_menu_only=True 시 Daily/Weekly 탭이 렌더링되지 않는다."""
+        resp = focus_only_client.get("/focus")
+        assert resp.status_code == 200
+        html = resp.data.decode("utf-8")
+        # 탭 a 태그 자체가 없어야 한다 (Focus 탭의 active class 검사는 별도).
+        assert "daily_page" not in html
+        assert "weekly_page" not in html
+
+    def test_default_config_keeps_daily_weekly_tabs(self, client):
+        """기본(SAMPLE_CONFIG, features 누락) 동작은 Daily/Weekly 탭 유지."""
+        resp = client.get("/focus")
+        assert resp.status_code == 200
+        html = resp.data.decode("utf-8")
+        assert "Daily" in html
+        assert "Weekly" in html
 
 
 class TestPreviewEndpoint:
@@ -413,3 +478,284 @@ class TestPreviewEndpoint:
         assert resp.status_code == 200
         assert data["success"] is True
         assert "<h2" in data["html"]
+
+
+# ── 수동 보고서 추가 (PR2) ──
+
+
+class TestWeeklyAddReport:
+    """POST /focus/add-report — URL 또는 PDF 첨부."""
+
+    def test_missing_both_inputs_returns_400(self, client):
+        resp = client.post(
+            "/focus/add-report",
+            data={},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert data["success"] is False
+
+    @patch("web_ui.app.is_safe_url", return_value=False)
+    def test_unsafe_url_returns_400(self, mock_safe, client):
+        resp = client.post(
+            "/focus/add-report",
+            data={"url": "http://127.0.0.1/admin"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "안전하지 않은" in data["error"] or "URL" in data["error"]
+
+    @patch("web_ui.app.is_safe_url", return_value=True)
+    @patch("web_ui.app.detect_url_kind", return_value="html")
+    @patch("web_ui.app.extract_url_metadata")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/x.txt"))
+    def test_html_url_extracts_metadata_and_inserts(
+        self, mock_save, mock_insert, mock_meta, mock_kind, mock_safe, client
+    ):
+        mock_meta.return_value = {
+            "title": "IBM AI Index 2026 Overview",
+            "description": "76% of enterprises have appointed CAIO...",
+        }
+
+        resp = client.post(
+            "/focus/add-report",
+            data={"url": "https://example.com/ibm-ai-index"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["title"] == "IBM AI Index 2026 Overview"
+        assert data["report"]["source_type"] == "url"
+        # insert_manual_report 호출 검증
+        mock_insert.assert_called_once()
+        kwargs = mock_insert.call_args.kwargs
+        assert kwargs["source_type"] == "url"
+        assert kwargs["url"] == "https://example.com/ibm-ai-index"
+
+    @patch("web_ui.app.is_safe_url", return_value=True)
+    @patch("web_ui.app.detect_url_kind", return_value="pdf")
+    @patch("web_ui.app.download_pdf")
+    @patch("web_ui.app.extract_pdf_text", return_value=("full text body", "first 3 pages"))
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/x.txt"))
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_pdf_url_downloads_extracts_summarizes(
+        self, mock_save, mock_insert, mock_claude_cls, mock_extract,
+        mock_download, mock_kind, mock_safe, client
+    ):
+        mock_claude = MagicMock()
+        mock_claude.summarize_report_text.return_value = "76% CAIO 신설..."
+        mock_claude_cls.return_value = mock_claude
+
+        resp = client.post(
+            "/focus/add-report",
+            data={"url": "https://example.com/report.pdf"},
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["source_type"] == "pdf"
+        mock_download.assert_called_once()
+        mock_extract.assert_called_once()
+        mock_claude.summarize_report_text.assert_called_once_with("full text body")
+
+    @patch("web_ui.app.extract_pdf_text", return_value=("full text", "head excerpt"))
+    @patch("web_ui.app.ClaudeService")
+    @patch("web_ui.app.insert_manual_report")
+    @patch("web_ui.app.save_report_text", return_value=Path("data/manual_reports/y.txt"))
+    @patch.dict("os.environ", {"CLAUDE_API_KEY": "sk-test"})
+    def test_pdf_file_upload(
+        self, mock_save, mock_insert, mock_claude_cls, mock_extract, client, tmp_path
+    ):
+        mock_claude = MagicMock()
+        mock_claude.summarize_report_text.return_value = "요약"
+        mock_claude_cls.return_value = mock_claude
+
+        # 유효한 PDF magic byte로 시작하는 더미 데이터
+        pdf_bytes = b"%PDF-1.4\n" + b"x" * 1024
+        with patch("web_ui.app.MANUAL_REPORTS_DIR", tmp_path):
+            resp = client.post(
+                "/focus/add-report",
+                data={
+                    "file": (io.BytesIO(pdf_bytes), "ibm_ai_index_2026.pdf"),
+                },
+                content_type="multipart/form-data",
+            )
+            data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["report"]["source_type"] == "pdf"
+        # 업로드된 파일이 tmp_path에 저장됐는지 확인
+        saved = list(tmp_path.glob("*.pdf"))
+        assert len(saved) == 1
+        assert saved[0].read_bytes().startswith(b"%PDF-")
+
+    def test_non_pdf_upload_rejected(self, client):
+        resp = client.post(
+            "/focus/add-report",
+            data={
+                "file": (io.BytesIO(b"not a pdf"), "fake.pdf"),
+            },
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "PDF" in data["error"]
+
+    def test_wrong_extension_rejected(self, client):
+        resp = client.post(
+            "/focus/add-report",
+            data={
+                "file": (io.BytesIO(b"%PDF-anything"), "evil.exe"),
+            },
+            content_type="multipart/form-data",
+        )
+        data = json.loads(resp.data)
+        assert resp.status_code == 400
+        assert "PDF" in data["error"]
+
+
+# ── DELETE /focus/article/<id> ──
+
+
+class TestFocusDeleteArticle:
+    """DELETE /focus/article/<id> — 수동 추가 기사 단건 삭제."""
+
+    def test_delete_success(self, client, db_conn):
+        insert_manual_article(db_conn, "T", "https://t.com/1", "d")
+        rows = db_conn.table("manual_articles").rows()
+        target_id = str(rows[0]["id"])
+
+        resp = client.delete(f"/focus/article/{target_id}")
+        data = json.loads(resp.data)
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["deleted_id"] == target_id
+        assert len(db_conn.table("manual_articles").rows()) == 0
+
+    def test_delete_not_found(self, client, db_conn):
+        insert_manual_article(db_conn, "T", "https://t.com/1", "d")
+        resp = client.delete("/focus/article/nonexistent-id-xyz")
+        data = json.loads(resp.data)
+        assert resp.status_code == 404
+        assert data["success"] is False
+        # 기존 데이터는 보존
+        assert len(db_conn.table("manual_articles").rows()) == 1
+
+    def test_delete_does_not_affect_other_tables(self, client, db_conn):
+        insert_daily_articles(db_conn, [{
+            "title": "Daily",
+            "url": "https://daily.com/1",
+            "description": "d",
+            "source_name": "Src",
+            "published_at": "2026-05-15T01:00:00Z",
+        }])
+        insert_manual_article(db_conn, "M", "https://m.com/1", "")
+        manual_id = str(db_conn.table("manual_articles").rows()[0]["id"])
+
+        resp = client.delete(f"/focus/article/{manual_id}")
+        assert resp.status_code == 200
+
+        assert len(db_conn.table("manual_articles").rows()) == 0
+        assert len(db_conn.table("daily_articles").rows()) == 1
+
+
+# ── DELETE /focus/report/<id> ──
+
+
+class TestFocusDeleteReport:
+    """DELETE /focus/report/<id> — 수동 추가 보고서 단건 삭제 + 파일 정리."""
+
+    def test_delete_url_report_success(self, client, db_conn):
+        rid = insert_manual_report(
+            db_conn,
+            title="URL 보고서",
+            source_type="url",
+            url="https://example.com/r1",
+            summary="요약",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        data = json.loads(resp.data)
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["deleted_id"] == rid
+        assert len(db_conn.table("manual_reports").rows()) == 0
+
+    def test_delete_pdf_report_removes_files(self, client, db_conn, tmp_path, monkeypatch):
+        # MANUAL_REPORTS_DIR 격리
+        fake_dir = tmp_path / "manual_reports"
+        fake_dir.mkdir()
+        monkeypatch.setattr(app_module, "MANUAL_REPORTS_DIR", fake_dir)
+
+        # 실제 파일 2개 생성
+        pdf_path = fake_dir / "report-abc.pdf"
+        txt_path = fake_dir / "report-abc.txt"
+        pdf_path.write_bytes(b"%PDF-1.4\nfake")
+        txt_path.write_text("fake text", encoding="utf-8")
+
+        rid = insert_manual_report(
+            db_conn,
+            title="PDF 보고서",
+            source_type="pdf",
+            original_filename="report.pdf",
+            file_path=str(pdf_path),
+            text_path=str(txt_path),
+            summary="요약",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+
+        # row 삭제 확인
+        assert len(db_conn.table("manual_reports").rows()) == 0
+        # 파일도 unlink 됨
+        assert not pdf_path.exists()
+        assert not txt_path.exists()
+
+    def test_delete_report_not_found(self, client, db_conn):
+        insert_manual_report(
+            db_conn, title="T", source_type="url", url="https://t.com",
+        )
+        resp = client.delete("/focus/report/nonexistent-id-xyz")
+        data = json.loads(resp.data)
+        assert resp.status_code == 404
+        assert data["success"] is False
+        assert len(db_conn.table("manual_reports").rows()) == 1
+
+    def test_delete_report_with_path_outside_dir_does_not_unlink(
+        self, client, db_conn, tmp_path, monkeypatch
+    ):
+        # MANUAL_REPORTS_DIR 격리
+        fake_dir = tmp_path / "manual_reports"
+        fake_dir.mkdir()
+        monkeypatch.setattr(app_module, "MANUAL_REPORTS_DIR", fake_dir)
+
+        # 디렉토리 밖에 파일을 둠 — path traversal 시나리오
+        outside = tmp_path / "outside.pdf"
+        outside.write_bytes(b"%PDF-1.4\nshould-not-delete")
+
+        rid = insert_manual_report(
+            db_conn,
+            title="Outside",
+            source_type="pdf",
+            file_path=str(outside),
+            summary="",
+        )
+
+        resp = client.delete(f"/focus/report/{rid}")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+        # row는 삭제됐지만 파일은 보존
+        assert len(db_conn.table("manual_reports").rows()) == 0
+        assert outside.exists()
