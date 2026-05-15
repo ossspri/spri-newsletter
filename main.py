@@ -36,7 +36,23 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 def load_config() -> dict:
-    config_path = BASE_DIR / "config.yaml"
+    """config.yaml 또는 SPRI_CONFIG 환경변수로 지정된 변종 설정 파일을 로드한다.
+
+    우선순위:
+      1. 환경변수 ``SPRI_CONFIG`` 가 설정되어 있으면 그 경로(절대 또는 BASE_DIR 상대)
+      2. 기본값 ``config.yaml`` (BASE_DIR 기준)
+
+    동료 PC 배포 zip 은 ``config.windows-portable.yaml`` 을 동봉하고
+    실행 스크립트(setup_local.bat 등)에서 ``set SPRI_CONFIG=config.windows-portable.yaml``
+    로 지정하여 메인 운영자의 ``config.yaml`` 과 충돌 없이 다른 기본값을 사용한다.
+    """
+    override = os.environ.get("SPRI_CONFIG", "").strip()
+    if override:
+        config_path = Path(override)
+        if not config_path.is_absolute():
+            config_path = BASE_DIR / config_path
+    else:
+        config_path = BASE_DIR / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -68,8 +84,8 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     5. Claude API 호출 → 뉴스레터 마크다운 생성
     6. 마크다운 → HTML 변환
     7. Gmail API → Daily 수신자에게 발송
-    8. Google Drive API → 구글 문서 생성 (Phase 5)
-    9. notebooklm-py → 기사 URL 저장 (Phase 5)
+    8. (제거됨, 2026-05-15) 이전: Google Drive API → 구글 문서 생성
+    9. (제거됨, 2026-05-15) 이전: notebooklm-py → 기사 URL 저장
     10. Google Sheets → 발송 이력 기록
     11. 로컬 백업 → .md 파일 저장
 

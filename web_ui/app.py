@@ -359,7 +359,7 @@ def create_app(config: dict, db_conn) -> Flask:
     def weekly_publish():
         """Weekly 표준 보고서를 발간한다 (Gmail 발송 → 로컬 백업).
 
-        2026-05-15 Drive/NotebookLM 통합 제거. Gmail 발송 + 로컬 .md 백업만.
+        (제거됨, 2026-05-15) Drive/NotebookLM 통합 제거. Gmail 발송 + 로컬 .md 백업만.
         """
         data = request.get_json() or {}
         markdown = data.get("markdown", "")
@@ -794,7 +794,8 @@ def create_app(config: dict, db_conn) -> Flask:
         try:
             recipients = cfg.get("recipients", {}).get("focus", [])
             if edited_html:
-                # 사용자가 미리보기 편집 → 그 HTML을 그대로 발송 (Drive 링크 갱신만 시도)
+                # 사용자가 미리보기 편집 → 그 HTML 을 그대로 발송
+                # (제거됨, 2026-05-15) 이전엔 Drive 링크 갱신을 시도했으나 통합 제거됨
                 html_body = edited_html
                 logger.info("Focus 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
             else:

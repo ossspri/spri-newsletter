@@ -1,7 +1,10 @@
 """src/google_auth.py — Google OAuth2 인증 공통 모듈
 
-PRD 9.1: Gmail API, Drive API, Docs API에 필요한 OAuth2 자격증명을 관리한다.
+PRD 9.1: Gmail API 에 필요한 OAuth2 자격증명을 관리한다.
 credentials/google_credentials.json → google_token.json 흐름.
+
+(제거됨, 2026-05-15) 이전엔 Drive API / Docs API scope 도 포함했으나
+Drive/NotebookLM 통합 제거와 함께 Gmail scope 2개만 남았다.
 """
 import logging
 from pathlib import Path
