@@ -1,0 +1,23 @@
+# SPRi Newsletter System
+
+## Agent Team Workflow
+
+이 저장소는 3개의 커스텀 서브에이전트로 업그레이드 작업을 진행합니다.
+정의 위치: `.claude/agents/`
+
+| 단계 | 에이전트 | 역할 | 수정 권한 |
+| --- | --- | --- | --- |
+| 1. 계획 | `upgrade-planner` | 변경 범위 / 단계 / 리스크 / 합격 조건 작성 | 읽기 전용 |
+| 2. 구현 | `code-modifier` | 계획서대로 코드 수정 | Edit/Write |
+| 3. 검증 | `integration-tester` | pytest·스모크·합격 조건 점검 | 읽기 전용 |
+
+### 표준 흐름
+1. 사용자가 변경 요청 → `upgrade-planner` 호출
+2. 계획서 확인/승인 → `code-modifier`에게 계획서 그대로 전달
+3. 구현 완료 → `integration-tester`에 변경 요약 + 합격 조건 전달
+4. FAIL 이면 원인과 함께 다시 `code-modifier` 로 루프
+
+### 호출 예시
+- "이 변경 계획을 세워줘" → planner 자동 위임
+- "계획대로 구현해줘" → code-modifier 위임 (planner 산출물을 입력으로)
+- "통합테스트 돌려줘" → integration-tester 위임
