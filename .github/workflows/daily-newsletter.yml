@@ -52,14 +52,6 @@ jobs:
           TZ: Asia/Seoul
         run: python main.py --mode daily --cron
 
-      - name: Run A/A'/B quality measurement
-        if: success()
-        env:
-          GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          TZ: Asia/Seoul
-        run: python scripts/daily_ab_test.py
-
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
