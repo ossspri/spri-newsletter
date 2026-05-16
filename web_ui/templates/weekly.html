@@ -205,7 +205,7 @@
 
   async function publishWeekly() {
     const md = document.getElementById('weekly-markdown-editor').value || weeklyMarkdown;
-    showLoading('보고서 발간 중... (이메일 → Drive → NotebookLM → 백업)');
+    showLoading('보고서 발간 중...');
     try {
       const data = await apiCall('/weekly/publish', {
         method: 'POST',
@@ -213,22 +213,8 @@
         body: JSON.stringify({ markdown: md }),
       });
       const r = data.results;
-      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
-      if (r.drive && r.drive.success) msg += ' · Drive 저장';
-      else if (r.drive) msg += ' · Drive 실패';
-      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
-      else if (r.notebooklm && r.notebooklm.skipped) msg += ' · NotebookLM 인증 만료';
-      else if (r.notebooklm) msg += ' · NotebookLM 실패';
-      if (r.backup && r.backup.success) msg += ' · 로컬 백업';
-      else if (r.backup) msg += ' · 백업 실패';
-      showToast(msg);
-
-      // NotebookLM 인증 만료 시 재인증 안내
-      if (r.notebooklm && r.notebooklm.skipped) {
-        showNlmReauthPrompt(md);
-      } else {
-        location.reload();
-      }
+      showToast(`✅ 뉴스레터 발송 성공! (${r.email.recipients}명)`);
+      location.reload();
     } catch (e) {
       showToast(e.message, true);
     } finally {

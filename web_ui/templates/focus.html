@@ -14,7 +14,7 @@
       <span id="selection-counter" class="counter">0/25 선택</span>
       <button class="btn btn-small" onclick="selectAll()">전체 선택</button>
       <button class="btn btn-small" onclick="deselectAll()">전체 해제</button>
-      <button id="btn-delete-selected" class="btn btn-small btn-delete-text" onclick="deleteSelectedManual()">선택 삭제</button>
+      <button class="btn btn-small btn-delete-selected" onclick="deleteSelected()">선택 삭제</button>
       <button id="btn-translate" class="btn btn-small btn-outline" onclick="translateArticles()">한국어 번역</button>
     </div>
   </div>
@@ -49,8 +49,6 @@
           <div class="article-desc">{{ a.description }}</div>
         </div>
       </label>
-      <button type="button" class="btn btn-small btn-danger"
-              onclick="deleteManualArticle('{{ a.id }}', this)">삭제</button>
     </div>
     {% endfor %}
   </div>
@@ -87,8 +85,6 @@
           <div class="article-desc">{{ (r.summary or '')[:200] }}{% if (r.summary or '')|length > 200 %}…{% endif %}</div>
         </div>
       </label>
-      <button type="button" class="btn btn-small btn-danger"
-              onclick="deleteManualReport('{{ r.id }}', this)">삭제</button>
     </div>
     {% endfor %}
   </div>
@@ -128,15 +124,87 @@
       <button id="btn-publish-weekly" class="btn btn-success" onclick="publishWeekly()" disabled>보고서 발간</button>
     </div>
   </div>
+  <!-- 수신자 관리 -->
+  <div class="recipients-section">
+    <label class="recipients-label">수신자:</label>
+    <div class="recipients-input-row">
+      <input type="email" id="focus-recipient-input"
+             placeholder="이메일 주소 입력" class="input-field">
+      <button class="btn btn-secondary btn-small" onclick="addFocusRecipient()">추가</button>
+    </div>
+    <div id="focus-recipients-list" class="recipients-tags"></div>
+  </div>
   <div class="preview-editable-hint">✏️ 아래 미리보기를 직접 클릭하여 문구를 수정할 수 있습니다. 편집 내용은 발간 시 그대로 이메일로 발송됩니다.</div>
   <div id="weekly-preview-container" class="preview-frame preview-editable" contenteditable="false">
     <p class="empty-state">보고서를 생성하면 미리보기가 표시됩니다.</p>
   </div>
 </section>
+
+<style>
+.recipients-section { margin: 1rem 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
+.recipients-label { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; display: block; }
+.recipients-input-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.recipients-input-row .input-field { flex: 1; }
+.recipients-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.recipient-tag { display: inline-flex; align-items: center; gap: 0.3rem; background: #e8f0fe; color: #1a73e8; border-radius: 16px; padding: 0.25rem 0.7rem; font-size: 0.85rem; }
+.tag-remove { background: none; border: none; color: #d93025; font-size: 1.1rem; cursor: pointer; padding: 0 0.2rem; line-height: 1; }
+.tag-remove:hover { color: #a50e0e; }
+.btn-delete-selected { color: #ff8a80 !important; }
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  // ── 수신자 관리 ──
+  async function loadFocusRecipients() {
+    try {
+      const data = await apiCall('/focus/recipients');
+      renderRecipientTags(data.recipients || []);
+    } catch (e) { console.error('수신자 로드 실패', e); }
+  }
+
+  function renderRecipientTags(emails) {
+    const container = document.getElementById('focus-recipients-list');
+    container.innerHTML = emails.map(e =>
+      `<span class="recipient-tag" data-email="${e}">${e}<button class="tag-remove" onclick="removeFocusRecipient('${e}')">&times;</button></span>`
+    ).join('');
+  }
+
+  async function addFocusRecipient() {
+    const input = document.getElementById('focus-recipient-input');
+    const email = input.value.trim();
+    if (!email || !email.includes('@')) { showToast('유효한 이메일을 입력하세요', true); return; }
+    try {
+      const data = await apiCall('/focus/recipients', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email}),
+      });
+      renderRecipientTags(data.recipients || []);
+      input.value = '';
+    } catch (e) { showToast(e.message, true); }
+  }
+
+  async function removeFocusRecipient(email) {
+    try {
+      const data = await apiCall('/focus/recipients', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email}),
+      });
+      renderRecipientTags(data.recipients || []);
+    } catch (e) { showToast(e.message, true); }
+  }
+
+  // Enter 키로 수신자 추가
+  document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('focus-recipient-input');
+    if (input) input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addFocusRecipient(); }
+    });
+    loadFocusRecipients();
+  });
+
   let weeklyMarkdown = '';
 
   function getSelectedArticles() {
@@ -176,12 +244,12 @@
   }
 
   function selectAll() {
-    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = true; });
+    document.querySelectorAll('.article-check, .report-check').forEach(cb => { cb.checked = true; });
     updateCounter();
   }
 
   function deselectAll() {
-    document.querySelectorAll('.article-check').forEach(cb => { cb.checked = false; });
+    document.querySelectorAll('.article-check, .report-check').forEach(cb => { cb.checked = false; });
     updateCounter();
   }
 
@@ -293,8 +361,6 @@
             <div class="article-desc">${escapedDesc}</div>
           </div>
         </label>
-        <button type="button" class="btn btn-small btn-danger"
-                onclick="deleteManualArticle('${escapedId}', this)">삭제</button>
       `;
       manualGroup.appendChild(itemDiv);
 
@@ -345,8 +411,6 @@
           <div class="article-desc">${summary}</div>
         </div>
       </label>
-      <button type="button" class="btn btn-small btn-danger"
-              onclick="deleteManualReport('${_escapeHtml(report.id)}', this)">삭제</button>
     `;
     group.appendChild(item);
   }
@@ -471,7 +535,7 @@
     const editedHtml = previewContainer.contentEditable === 'true'
         ? (previewContainer.innerHTML || '').trim()
         : '';
-    showLoading('보고서 발간 중... (이메일 → Drive → NotebookLM → 백업)');
+    showLoading('보고서 발간 중...');
     try {
       const data = await apiCall('/focus/publish', {
         method: 'POST',
@@ -479,25 +543,12 @@
         body: JSON.stringify({
           markdown: md,
           edited_html: editedHtml,
+          recipients: Array.from(document.querySelectorAll('#focus-recipients-list .recipient-tag')).map(el => el.dataset.email),
         }),
       });
       const r = data.results;
-      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
-      if (r.drive && r.drive.success) msg += ' · Drive 저장';
-      else if (r.drive) msg += ' · Drive 실패';
-      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
-      else if (r.notebooklm && r.notebooklm.skipped) msg += ' · NotebookLM 인증 만료';
-      else if (r.notebooklm) msg += ' · NotebookLM 실패';
-      if (r.backup && r.backup.success) msg += ' · 로컬 백업';
-      else if (r.backup) msg += ' · 백업 실패';
-      showToast(msg);
-
-      // NotebookLM 인증 만료 시 재인증 안내
-      if (r.notebooklm && r.notebooklm.skipped) {
-        showNlmReauthPrompt(md);
-      } else {
-        location.reload();
-      }
+      showToast(`✅ 뉴스레터 발송 성공! (${r.email.recipients}명)`);
+      location.reload();
     } catch (e) {
       showToast(e.message, true);
     } finally {
@@ -588,6 +639,33 @@
       showToast(e.message, true);
       btn.disabled = false;
       btn.textContent = '로그인 완료 / 저장';
+    }
+  }
+
+  async function deleteSelected() {
+    const checkedArticles = Array.from(document.querySelectorAll('.article-check:checked'))
+      .filter(cb => cb.dataset.id.startsWith('manual-'))
+      .map(cb => cb.dataset.id.replace('manual-', ''));
+    const checkedReports = Array.from(document.querySelectorAll('.report-check:checked'))
+      .map(cb => cb.dataset.id.replace('report-', ''));
+
+    if (checkedArticles.length === 0 && checkedReports.length === 0) {
+      showToast('삭제할 항목을 선택하세요', true);
+      return;
+    }
+    const total = checkedArticles.length + checkedReports.length;
+    if (!confirm(`선택한 ${total}건을 삭제하시겠습니까?`)) return;
+
+    try {
+      await apiCall('/focus/bulk-delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({article_ids: checkedArticles, report_ids: checkedReports}),
+      });
+      showToast(`${total}건 삭제 완료`);
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
     }
   }
 
