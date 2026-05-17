@@ -11,7 +11,6 @@
 | 항목 | 비고 |
 |---|---|
 | Windows 10 22H2 또는 Windows 11 | UTF-8 코드페이지 활성 권장 |
-| Python 3.11.x | 시스템 설치 또는 zip 동봉 embeddable |
 | 빈 디스크 2GB+ | zip 추출 후 약 300MB |
 | 인터넷 | Anthropic API + Gmail HTTPS 통과 필수 (Drive 차단은 무관) |
 | Chrome 또는 Edge 최신 | OAuth 동의용 |
@@ -22,7 +21,32 @@
 
 ---
 
-## 1. 압축 해제
+## 1. Python 설치
+
+> 이미 Python 3.11 이상이 설치되어 있다면 이 단계를 건너뛰세요.
+> 확인 방법: `Win+R` → `cmd` → `python --version` 입력 → `Python 3.11.x` 이상이면 OK.
+
+1. https://www.python.org/downloads/ 에 접속
+2. **Download Python 3.11.x** (또는 3.12.x) 클릭하여 설치 파일 다운로드
+3. 설치 파일 실행 시 **첫 화면에서 반드시 아래 두 항목 체크**:
+   - ☑ **Add python.exe to PATH** ← 체크 안 하면 이후 모든 단계가 실패합니다
+   - ☑ Use admin privileges when installing py.exe
+4. **Install Now** 클릭 (기본 설정 그대로 설치)
+5. 설치 완료 후 **"Disable path length limit"** 버튼이 보이면 클릭 (긴 경로 지원)
+6. 설치 확인:
+   ```
+   Win+R → cmd 실행 후:
+   python --version
+   pip --version
+   ```
+   둘 다 버전이 출력되면 성공.
+
+> **사내 프록시 환경**: pip install 시 SSL 오류가 나면 `docs\TROUBLESHOOTING.md`의
+> "pip SSL/사내 프록시" 절을 참고하세요.
+
+---
+
+## 2. 압축 해제
 
 1. zip 을 **한글이 없는 경로**에 해제합니다.
    - 권장: `C:\spri-newsletter\` 또는 `D:\work\spri-newsletter\`
@@ -36,9 +60,9 @@
 
 ---
 
-## 2. 시크릿 배치
+## 3. 시크릿 배치
 
-### 2-1. OAuth client JSON
+### 3-1. OAuth client JSON
 
 > zip에 이미 `credentials/google_credentials.json`이 포함되어 있다면 이 단계는 건너뛰세요.
 
@@ -49,7 +73,7 @@ zip에 포함되어 있지 않은 경우, 메인 운영자에게 받은 `google_
 
 > [SCREENSHOT placeholder] credentials 폴더에 JSON 파일이 놓인 모습
 
-### 2-2. `.env` (자동 안내)
+### 3-2. `.env` (자동 안내)
 
 다음 단계의 `setup_local.bat` 가 `.env` 가 없을 때 자동으로 `.env.example` 을 복사하고
 메모장을 열어 줍니다. 메모장에서 최소 다음 키를 입력 후 저장하세요.
@@ -60,7 +84,7 @@ GNEWS_API_KEY=               # Focus 만 쓰면 빈 값 OK
 
 ---
 
-## 3. 셋업 스크립트 실행
+## 4. 셋업 스크립트 실행
 
 설치 폴더에서 다음 파일을 더블클릭합니다.
 ```
@@ -86,7 +110,7 @@ scripts\win\setup_local.bat
 
 ---
 
-## 4. 서버 시작
+## 5. 서버 시작
 
 ```
 scripts\win\start_server.bat
@@ -101,7 +125,7 @@ http://127.0.0.1:5000
 
 ---
 
-## 5. 첫 Focus 뉴스레터 발송
+## 6. 첫 Focus 뉴스레터 발송
 
 1. 상단 **Focus** 탭 클릭
 2. 좌측 큐레이션 영역에서:
@@ -121,7 +145,7 @@ http://127.0.0.1:5000
 
 ---
 
-## 6. 일상 운영
+## 7. 일상 운영
 
 | 상황 | 명령 |
 |---|---|
