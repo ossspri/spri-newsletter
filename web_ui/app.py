@@ -671,6 +671,7 @@ def create_app(config: dict, db_conn) -> Flask:
 
     @app.route("/focus/bulk-delete", methods=["POST"])
     def focus_bulk_delete():
+        """수동 기사/보고서를 일괄 삭제한다."""
         data = request.get_json(force=True)
         article_ids = data.get("article_ids", [])
         report_ids = data.get("report_ids", [])
@@ -694,7 +695,6 @@ def create_app(config: dict, db_conn) -> Flask:
                 row = delete_manual_report(get_db(), rid)
                 if row is not None:
                     deleted += 1
-                    # 부수 파일 삭제
                     base = MANUAL_REPORTS_DIR.resolve()
                     for key in ("file_path", "text_path"):
                         val = (row.get(key) or "").strip()

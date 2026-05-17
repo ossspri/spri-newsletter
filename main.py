@@ -224,8 +224,6 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     if archive_rows:
         archive_articles(db_conn, date_str, "daily", archive_rows)
 
-    # P0(2026-05-13): 발행 결과물(.md, .csv) git 자동 commit + push.
-    # push 실패는 warn만 (commit은 보존, 다음 실행에서 재전송).
     logger.info("Daily 파이프라인 완료 (status=%s)", send_status)
 
 

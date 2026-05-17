@@ -706,81 +706,29 @@
   }
 
   async function deleteSelectedManual() {
-    const manualArticleChecks = Array.from(
-      document.querySelectorAll('.article-check:checked')
-    ).filter(cb => (cb.dataset.id || '').startsWith('manual-'));
+    const checkedArticles = Array.from(document.querySelectorAll('.article-check:checked'))
+      .filter(cb => (cb.dataset.id || '').startsWith('manual-'))
+      .map(cb => (cb.dataset.id || '').replace(/^manual-/, ''));
+    const checkedReports = Array.from(document.querySelectorAll('.report-check:checked'))
+      .map(cb => (cb.dataset.id || '').replace(/^report-/, ''));
 
-    const manualReportChecks = Array.from(
-      document.querySelectorAll('.report-check:checked')
-    );
-
-    const articleCount = manualArticleChecks.length;
-    const reportCount = manualReportChecks.length;
-
-    if (articleCount === 0 && reportCount === 0) {
-      showToast('삭제할 수동 기사/보고서가 선택되지 않았습니다. (Daily 수집 기사는 삭제 대상이 아닙니다.)', true);
+    if (checkedArticles.length === 0 && checkedReports.length === 0) {
+      showToast('삭제할 항목을 선택하세요', true);
       return;
     }
+    const total = checkedArticles.length + checkedReports.length;
+    if (!confirm(`선택한 ${total}건을 삭제하시겠습니까?`)) return;
 
-    if (!confirm(`수동 기사 ${articleCount}건, 수동 보고서 ${reportCount}건을 삭제합니다. 계속하시겠습니까?`)) {
-      return;
-    }
-
-    const btn = document.getElementById('btn-delete-selected');
-    btn.disabled = true;
-
-    let articleOk = 0, articleFail = 0;
-    let reportOk = 0, reportFail = 0;
-    const failures = [];
-
-    for (const cb of manualArticleChecks) {
-      const rawId = (cb.dataset.id || '').replace(/^manual-/, '');
-      if (rawId.startsWith('new-')) {
-        articleFail++;
-        failures.push(`기사 "${cb.dataset.title || rawId}" (저장 전 임시 항목, 페이지 새로고침 후 재시도)`);
-        continue;
-      }
-      try {
-        await apiCall('/focus/article/' + encodeURIComponent(rawId), { method: 'DELETE' });
-        const item = cb.closest('.article-item');
-        if (item) item.remove();
-        articleOk++;
-      } catch (e) {
-        articleFail++;
-        failures.push(`기사 "${cb.dataset.title || rawId}": ${e.message}`);
-      }
-    }
-
-    for (const cb of manualReportChecks) {
-      const rawId = (cb.dataset.id || '').replace(/^report-/, '');
-      try {
-        await apiCall('/focus/report/' + encodeURIComponent(rawId), { method: 'DELETE' });
-        const item = cb.closest('.article-item');
-        if (item) item.remove();
-        reportOk++;
-      } catch (e) {
-        reportFail++;
-        failures.push(`보고서 "${cb.dataset.title || rawId}": ${e.message}`);
-      }
-    }
-
-    const articleGroup = document.getElementById('manual-articles-group');
-    if (articleGroup && articleGroup.querySelectorAll('.article-item').length === 0) {
-      articleGroup.remove();
-    }
-    const reportGroup = document.getElementById('manual-reports-group');
-    if (reportGroup && reportGroup.querySelectorAll('.article-item').length === 0) {
-      reportGroup.remove();
-    }
-
-    updateCounter();
-    btn.disabled = false;
-
-    if (articleFail === 0 && reportFail === 0) {
-      showToast(`삭제 완료: 기사 ${articleOk}건, 보고서 ${reportOk}건`);
-    } else {
-      const summary = `삭제 결과: 기사 ${articleOk}/${articleOk+articleFail}, 보고서 ${reportOk}/${reportOk+reportFail}\n실패: ${failures.slice(0,3).join(' / ')}${failures.length>3 ? ` 외 ${failures.length-3}건` : ''}`;
-      showToast(summary, true);
+    try {
+      await apiCall('/focus/bulk-delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({article_ids: checkedArticles, report_ids: checkedReports}),
+      });
+      showToast(`${total}건 삭제 완료`);
+      location.reload();
+    } catch (e) {
+      showToast(e.message, true);
     }
   }
 </script>
