@@ -21,28 +21,20 @@
 
 ---
 
-## 1. Python 설치
+## 1. Python 설치 (자동)
 
-> 이미 Python 3.11 이상이 설치되어 있다면 이 단계를 건너뛰세요.
-> 확인 방법: `Win+R` → `cmd` → `python --version` 입력 → `Python 3.11.x` 이상이면 OK.
+> `setup_local.bat`가 Python을 자동 감지하여, 미설치 시 자동으로 다운로드+설치합니다.
+> **수동 설치가 필요 없습니다.** 아래는 자동 설치가 실패할 경우의 수동 절차입니다.
+
+### 자동 설치가 실패한 경우 (사내망 다운로드 차단 등)
 
 1. https://www.python.org/downloads/ 에 접속
-2. **Download Python 3.11.x** (또는 3.12.x) 클릭하여 설치 파일 다운로드
-3. 설치 파일 실행 시 **첫 화면에서 반드시 아래 두 항목 체크**:
-   - ☑ **Add python.exe to PATH** ← 체크 안 하면 이후 모든 단계가 실패합니다
-   - ☑ Use admin privileges when installing py.exe
-4. **Install Now** 클릭 (기본 설정 그대로 설치)
-5. 설치 완료 후 **"Disable path length limit"** 버튼이 보이면 클릭 (긴 경로 지원)
-6. 설치 확인:
-   ```
-   Win+R → cmd 실행 후:
-   python --version
-   pip --version
-   ```
-   둘 다 버전이 출력되면 성공.
+2. **Download Python 3.11.x** 클릭하여 설치 파일 다운로드
+3. 설치 시 **"Add python.exe to PATH" 반드시 체크**
+4. **Install Now** 클릭
+5. 설치 확인: `Win+R` → `cmd` → `python --version`
 
-> **사내 프록시 환경**: pip install 시 SSL 오류가 나면 `docs\TROUBLESHOOTING.md`의
-> "pip SSL/사내 프록시" 절을 참고하세요.
+> **사내 프록시 환경**: 다운로드나 pip install 시 오류가 나면 `docs\TROUBLESHOOTING.md` 참고.
 
 ---
 
@@ -62,24 +54,23 @@
 
 ## 3. 시크릿 배치
 
-### 3-1. OAuth client JSON
+### 3-1. `.env` 파일 덮어쓰기
+
+메인 운영자가 메일로 보낸 `.env` 파일을 **설치 폴더 최상위**에 덮어쓰기합니다.
+```
+<설치폴더>\.env    ← 여기에 덮어쓰기
+```
+
+> zip에 기본 `.env`가 포함되어 있지만 키 값이 비어 있습니다.
+> 메일로 받은 파일로 교체하면 API 키가 자동 설정됩니다.
+
+### 3-2. OAuth client JSON
 
 > zip에 이미 `credentials/google_credentials.json`이 포함되어 있다면 이 단계는 건너뛰세요.
 
 zip에 포함되어 있지 않은 경우, 메인 운영자에게 받은 `google_credentials.json` 을 다음 위치에 배치합니다.
 ```
 <설치폴더>\credentials\google_credentials.json
-```
-
-> [SCREENSHOT placeholder] credentials 폴더에 JSON 파일이 놓인 모습
-
-### 3-2. `.env` (자동 안내)
-
-다음 단계의 `setup_local.bat` 가 `.env` 가 없을 때 자동으로 `.env.example` 을 복사하고
-메모장을 열어 줍니다. 메모장에서 최소 다음 키를 입력 후 저장하세요.
-```
-CLAUDE_API_KEY=sk-ant-...   # 동료 본인의 키
-GNEWS_API_KEY=               # Focus 만 쓰면 빈 값 OK
 ```
 
 ---
