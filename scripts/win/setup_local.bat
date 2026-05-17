@@ -66,7 +66,13 @@ if errorlevel 1 (
 REM ── 4. 첫 OAuth 트리거 ──
 echo.
 echo [STEP 4/4] 첫 OAuth 동의를 위해 server 를 잠시 띄웁니다.
-echo          브라우저가 자동으로 열리면 동의 후 창을 닫지 마세요.
+echo.
+echo          *** 중요 ***
+echo          브라우저가 열리면 [팀 공용 Gmail 계정]으로 로그인하세요.
+echo          개인 Gmail이 아닙니다! (계정 정보는 메인 운영자에게 확인)
+echo          "다른 계정 사용" 을 클릭하면 계정을 선택할 수 있습니다.
+echo.
+echo          동의 후 창을 닫지 마세요.
 echo          서버는 30초 후 자동 종료됩니다. (start_server.bat 로 다시 시작 가능)
 echo.
 

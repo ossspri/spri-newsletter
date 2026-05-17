@@ -16,7 +16,8 @@
 | 인터넷 | Anthropic API + Gmail HTTPS 통과 필수 (Drive 차단은 무관) |
 | Chrome 또는 Edge 최신 | OAuth 동의용 |
 | `spri-newsletter-v<날짜>.zip` | 메인 운영자가 전달 |
-| OAuth client JSON | 별도 채널로 메인 운영자에게 받아 둠 (`google_credentials.json`) |
+| OAuth client JSON | zip에 이미 포함됨 (없으면 메인 운영자에게 요청) |
+| 팀 공용 Gmail 계정 정보 | 메인 운영자에게 확인 (OAuth 인증 시 이 계정으로 로그인) |
 | Anthropic API key | 동료가 자기 키 발급 권장 |
 
 ---
@@ -39,7 +40,9 @@
 
 ### 2-1. OAuth client JSON
 
-받은 `google_credentials.json` 을 다음 위치에 배치합니다.
+> zip에 이미 `credentials/google_credentials.json`이 포함되어 있다면 이 단계는 건너뛰세요.
+
+zip에 포함되어 있지 않은 경우, 메인 운영자에게 받은 `google_credentials.json` 을 다음 위치에 배치합니다.
 ```
 <설치폴더>\credentials\google_credentials.json
 ```
@@ -69,8 +72,12 @@ scripts\win\setup_local.bat
 2. `credentials\google_credentials.json` 존재 확인
 3. `.venv` 가상환경 생성 + `pip install -r requirements.txt`
 4. 첫 OAuth 트리거 — 브라우저가 자동으로 열립니다.
-   - 본인의 Google 계정으로 로그인 → "Gmail 보내기", "Gmail 읽기" 권한 동의
+   - **반드시 팀 공용 Gmail 계정으로 로그인** → "Gmail 보내기", "Gmail 읽기" 권한 동의
+   - 개인 Gmail이 Chrome에 로그인되어 있으면 "다른 계정 사용"을 클릭하세요
    - 동의 후 브라우저 창은 그대로 두세요 (스크립트가 30초 후 자동 종료)
+
+> **주의**: 개인 Gmail로 로그인하면 개인 계정에서 뉴스레터가 발송됩니다.
+> 팀 계정 정보는 메인 운영자에게 문의하세요.
 
 > [SCREENSHOT placeholder] OAuth 동의 화면 (Gmail 권한 2개만 노출됨, Drive 권한 없음)
 
@@ -104,9 +111,13 @@ http://127.0.0.1:5000
 4. "생성" 클릭 → Claude 가 본문 초안 작성 (수십 초 소요)
 5. "미리보기" 로 본문 검토
 6. "발간" 클릭 → 5분 이내 Gmail Sent 폴더에 메일이 도착하면 성공
+7. 수신된 메일의 **발신자가 팀 공용 Gmail 주소**인지 확인
 
 > 처음 발송 시 수신자 리스트가 비어 있어 오류가 나면, `config.windows-portable.yaml`
 > 의 `recipients.focus` 에 이메일을 추가하거나 UI 에서 직접 추가하세요.
+>
+> 발신자가 개인 Gmail로 표시되면 토큰을 재발급해야 합니다:
+> `credentials\google_token.json` 삭제 후 `setup_local.bat` 재실행.
 
 ---
 
