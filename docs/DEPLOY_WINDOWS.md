@@ -6,19 +6,6 @@
 
 ---
 
-## 0. 사전 준비물
-
-| 항목 | 비고 |
-|---|---|
-| Windows 10 22H2 또는 Windows 11 | UTF-8 코드페이지 활성 권장 |
-| 빈 디스크 2GB+ | zip 추출 후 약 300MB |
-| 인터넷 | Anthropic API + Gmail HTTPS 통과 필수 (Drive 차단은 무관) |
-| Chrome 또는 Edge 최신 | OAuth 동의용 |
-| `spri-newsletter-v<날짜>.zip` | 메인 운영자가 전달 |
-| OAuth client JSON | zip에 이미 포함됨 (없으면 메인 운영자에게 요청) |
-| 팀 공용 Gmail 계정 정보 | 메인 운영자에게 확인 (OAuth 인증 시 이 계정으로 로그인) |
-| Anthropic API key | 동료가 자기 키 발급 권장 |
-
 ---
 
 ## 1. Python 설치 (자동)
@@ -43,12 +30,6 @@
 1. zip 을 **한글이 없는 경로**에 해제합니다.
    - 권장: `C:\spri-newsletter\` 또는 `D:\work\spri-newsletter\`
    - 비권장: `C:\사용자\이름\바탕화면\` (한글 인코딩 이슈 가능)
-2. zip 의 SHA-256 을 메인 운영자가 전달한 값과 비교해 무결성 확인.
-   ```
-   certutil -hashfile spri-newsletter-v<날짜>.zip SHA256
-   ```
-
-> [SCREENSHOT placeholder] 압축 해제 후 디렉토리 구조 (`scripts/`, `data/`, `docs/`, `setup_local.bat` 등 확인)
 
 ---
 
@@ -56,7 +37,7 @@
 
 ### 3-1. `.env` 파일 덮어쓰기
 
-메인 운영자가 메일로 보낸 `.env` 파일을 **설치 폴더 최상위**에 덮어쓰기합니다.
+메일로 받은 `.env` 파일을 **설치 폴더 최상위**에 덮어쓰기합니다.
 ```
 <설치폴더>\.env    ← 여기에 덮어쓰기
 ```
@@ -68,7 +49,7 @@
 
 > zip에 이미 `credentials/google_credentials.json`이 포함되어 있다면 이 단계는 건너뛰세요.
 
-zip에 포함되어 있지 않은 경우, 메인 운영자에게 받은 `google_credentials.json` 을 다음 위치에 배치합니다.
+zip에 포함되어 있지 않은 경우, 메일로 받은 `google_credentials.json` 을 다음 위치에 배치합니다.
 ```
 <설치폴더>\credentials\google_credentials.json
 ```
@@ -82,22 +63,21 @@ zip에 포함되어 있지 않은 경우, 메인 운영자에게 받은 `google_
 scripts\win\setup_local.bat
 ```
 
-스크립트가 다음을 자동 수행합니다.
-1. `.env` 가 없으면 메모장 자동 오픈 → 키 입력 후 저장
+화면 안내에 따라 순서대로 진행합니다.
+1. `.env` 가 없으면 메모장이 열립니다 → API 키 입력 후 저장
 2. `credentials\google_credentials.json` 존재 확인
-3. `.venv` 가상환경 생성 + `pip install -r requirements.txt`
-4. 첫 OAuth 트리거 — 브라우저가 자동으로 열립니다.
+3. Python 미설치 시 자동 다운로드 + 설치 (1-2분 소요)
+4. `.venv` 가상환경 생성 + 의존성 설치
+5. 첫 OAuth 트리거 — 브라우저가 자동으로 열립니다.
    - **반드시 팀 공용 Gmail 계정으로 로그인** → "Gmail 보내기", "Gmail 읽기" 권한 동의
    - 개인 Gmail이 Chrome에 로그인되어 있으면 "다른 계정 사용"을 클릭하세요
    - 동의 후 브라우저 창은 그대로 두세요 (스크립트가 30초 후 자동 종료)
 
 > **주의**: 개인 Gmail로 로그인하면 개인 계정에서 뉴스레터가 발송됩니다.
-> 팀 계정 정보는 메인 운영자에게 문의하세요.
-
-> [SCREENSHOT placeholder] OAuth 동의 화면 (Gmail 권한 2개만 노출됨, Drive 권한 없음)
+> 팀 계정 정보는 메인PC에서 확인하세요.
 
 성공 시 `credentials\google_token.json` 이 생성됩니다. 이 파일은 **이 PC 전용**입니다.
-메인 운영자나 다른 PC 의 token 파일을 복사해 쓰지 마세요 (refresh 충돌 위험).
+다른 PC 의 token 파일을 복사해 쓰지 마세요 (refresh 충돌 위험).
 
 ---
 
@@ -111,8 +91,6 @@ scripts\win\start_server.bat
 ```
 http://127.0.0.1:5000
 ```
-
-> [SCREENSHOT placeholder] Web UI 메인 화면 (Daily / Weekly / Focus 탭)
 
 ---
 
@@ -142,7 +120,7 @@ http://127.0.0.1:5000
 |---|---|
 | 서버 시작 | `scripts\win\start_server.bat` 더블클릭 |
 | 서버 종료 | 콘솔 창 닫기 또는 `scripts\win\stop_server.bat` |
-| 의존성 업데이트 | 메인 운영자가 새 zip 배포 → 압축 해제 후 `setup_local.bat` 재실행 |
+| 의존성 업데이트 | 메인PC에서 새 zip 배포 → 압축 해제 후 `setup_local.bat` 재실행 |
 | 보낸 메일 이력 확인 | `data\db\newsletter_log.csv`, Gmail Sent 폴더 |
 
 ---
@@ -150,5 +128,3 @@ http://127.0.0.1:5000
 ## 문제 해결
 
 `docs\TROUBLESHOOTING.md` 와 `docs\FAQ_DRIVE_BLOCKED.md` 를 참고하세요.
-
-비상 연락처: (메인 운영자 정보)
