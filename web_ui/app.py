@@ -5,6 +5,7 @@ Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발간(Gmail 발송)
 Weekly 탭: 자동 daily 기사 선택 → 생성 → 발간 (표준)
 Focus 탭: 수동 기사·보고서·전문가 인사이트·편집 미리보기 → 발간 (큐레이션)
 """
+import json
 import logging
 import os
 from datetime import datetime
@@ -50,6 +51,20 @@ from src.utils import get_kst_date_str, get_kst_display_date
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+FOCUS_RECIPIENTS_PATH = BASE_DIR / "data" / "focus_recipients.json"
+
+
+def load_focus_recipients():
+    if FOCUS_RECIPIENTS_PATH.exists():
+        return json.loads(FOCUS_RECIPIENTS_PATH.read_text(encoding="utf-8"))
+    return []
+
+
+def save_focus_recipients(emails):
+    FOCUS_RECIPIENTS_PATH.write_text(
+        json.dumps(emails, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def extract_url_metadata(url: str) -> dict:
@@ -662,42 +677,37 @@ def create_app(config: dict, db_conn) -> Flask:
         report_ids = data.get("report_ids", [])
         deleted = 0
 
-        db = get_db()
         for aid in article_ids:
             aid = (aid or "").strip()
             if not aid:
                 continue
             try:
-                if delete_manual_article(db, aid):
+                if delete_manual_article(get_db(), aid):
                     deleted += 1
             except Exception as e:
-                logger.warning("bulk-delete 기사 삭제 실패 id=%s: %s", aid, e)
+                logger.warning("bulk-delete: 기사 삭제 실패 id=%s: %s", aid, e)
 
         for rid in report_ids:
             rid = (rid or "").strip()
             if not rid:
                 continue
             try:
-                row = delete_manual_report(db, rid)
+                row = delete_manual_report(get_db(), rid)
                 if row is not None:
                     deleted += 1
-                    # 부수 파일 삭제
-                    try:
-                        base = MANUAL_REPORTS_DIR.resolve()
-                        for key in ("file_path", "text_path"):
-                            val = (row.get(key) or "").strip()
-                            if not val:
-                                continue
-                            p = Path(val).resolve()
-                            try:
-                                p.relative_to(base)
-                            except ValueError:
-                                continue
-                            p.unlink(missing_ok=True)
-                    except Exception as e:
-                        logger.warning("bulk-delete 보고서 파일 정리 실패 id=%s: %s", rid, e)
+                    base = MANUAL_REPORTS_DIR.resolve()
+                    for key in ("file_path", "text_path"):
+                        val = (row.get(key) or "").strip()
+                        if not val:
+                            continue
+                        p = Path(val).resolve()
+                        try:
+                            p.relative_to(base)
+                        except ValueError:
+                            continue
+                        p.unlink(missing_ok=True)
             except Exception as e:
-                logger.warning("bulk-delete 보고서 삭제 실패 id=%s: %s", rid, e)
+                logger.warning("bulk-delete: 보고서 삭제 실패 id=%s: %s", rid, e)
 
         return jsonify({"success": True, "deleted": deleted})
 
@@ -773,6 +783,31 @@ def create_app(config: dict, db_conn) -> Flask:
             logger.error("주간 보고서 생성 실패: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/focus/recipients", methods=["GET"])
+    def focus_recipients_get():
+        return jsonify({"success": True, "recipients": load_focus_recipients()})
+
+    @app.route("/focus/recipients", methods=["POST"])
+    def focus_recipients_add():
+        data = request.get_json(force=True)
+        email = (data.get("email") or "").strip().lower()
+        if not email or "@" not in email or " " in email:
+            return jsonify({"success": False, "error": "유효하지 않은 이메일"}), 400
+        emails = load_focus_recipients()
+        if email not in emails:
+            emails.append(email)
+            save_focus_recipients(emails)
+        return jsonify({"success": True, "recipients": emails})
+
+    @app.route("/focus/recipients", methods=["DELETE"])
+    def focus_recipients_remove():
+        data = request.get_json(force=True)
+        email = (data.get("email") or "").strip().lower()
+        emails = load_focus_recipients()
+        emails = [e for e in emails if e != email]
+        save_focus_recipients(emails)
+        return jsonify({"success": True, "recipients": emails})
+
     @app.route("/focus/publish", methods=["POST"])
     def focus_publish():
         """Focus 보고서를 발간한다 (Gmail 발송 → 로컬 백업).
@@ -797,7 +832,11 @@ def create_app(config: dict, db_conn) -> Flask:
 
         # ── Step 4: Gmail 발송 ──
         try:
-            recipients = cfg.get("recipients", {}).get("focus", [])
+            recipients = data.get("recipients") or load_focus_recipients()
+            if not recipients:
+                recipients = cfg.get("recipients", {}).get("focus", [])
+            if not recipients:
+                return jsonify({"success": False, "error": "수신자가 지정되지 않았습니다."}), 400
             if edited_html:
                 # 사용자가 미리보기 편집 → 그 HTML 을 그대로 발송
                 # (제거됨, 2026-05-15) 이전엔 Drive 링크 갱신을 시도했으나 통합 제거됨

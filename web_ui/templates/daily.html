@@ -230,7 +230,7 @@
     if (!confirm('오늘 이미 발간됨. 재발간하시겠습니까?')) return;
     {% endif %}
     const md = document.getElementById('markdown-editor').value || currentMarkdown;
-    showLoading('뉴스레터 발간 중... (이메일 → Drive → NotebookLM)');
+    showLoading('뉴스레터 발간 중...');
     try {
       const data = await apiCall('/daily/publish', {
         method: 'POST',
@@ -238,12 +238,7 @@
         body: JSON.stringify({ markdown: md }),
       });
       const r = data.results;
-      let msg = `발간 완료: 이메일 ${r.email.recipients}명`;
-      if (r.drive && r.drive.success) msg += ' · Drive 저장';
-      else if (r.drive) msg += ' · Drive 실패';
-      if (r.notebooklm && r.notebooklm.success) msg += ' · NotebookLM 저장';
-      else if (r.notebooklm) msg += ' · NotebookLM 실패';
-      showToast(msg);
+      showToast(`✅ 뉴스레터 발송 성공! (${r.email.recipients}명)`);
       location.reload();
     } catch (e) {
       showToast(e.message, true);
