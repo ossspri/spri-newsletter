@@ -44,7 +44,6 @@ from src.news_service import GNewsService
 from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
-from src.git_sync import GitSync, GitSyncError
 from src.google_auth import get_google_credentials
 from src.utils import get_kst_date_str, get_kst_display_date
 
@@ -247,18 +246,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "git_sync": None}
-
-        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
-        git_sync = GitSync(BASE_DIR, cfg)
-        try:
-            git_sync.pull_or_fail()
-        except GitSyncError as e:
-            logger.error("git_sync pull 실패 — Daily 발송 차단: %s", e)
-            return jsonify({
-                "success": False,
-                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
-            }), 409
+        results = {"email": None}
 
         # ── Step 4: Gmail 발송 ──
         try:
@@ -282,14 +270,6 @@ def create_app(config: dict, db_conn) -> Flask:
 
         # ── 발송 이력 기록 ──
         log_newsletter(db, "daily", 0, len(recipients), "success")
-
-        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
-        try:
-            results["git_sync"] = git_sync.commit_and_push("daily", date_str)
-        except Exception as e:
-            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
-            results["git_sync"] = {"committed": False, "pushed": False,
-                                   "skipped": "exception", "error": str(e)}
 
         return jsonify({"success": True, "results": results})
 
@@ -382,18 +362,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "backup": None, "git_sync": None}
-
-        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
-        git_sync = GitSync(BASE_DIR, cfg)
-        try:
-            git_sync.pull_or_fail()
-        except GitSyncError as e:
-            logger.error("git_sync pull 실패 — Weekly 발송 차단: %s", e)
-            return jsonify({
-                "success": False,
-                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
-            }), 409
+        results = {"email": None, "backup": None}
 
         # ── Step 4: Gmail 발송 ──
         try:
@@ -429,14 +398,6 @@ def create_app(config: dict, db_conn) -> Flask:
 
         # ── 발송 이력 기록 ──
         log_newsletter(db, "weekly", 0, len(recipients), "success")
-
-        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
-        try:
-            results["git_sync"] = git_sync.commit_and_push("weekly", date_str)
-        except Exception as e:
-            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
-            results["git_sync"] = {"committed": False, "pushed": False,
-                                   "skipped": "exception", "error": str(e)}
 
         return jsonify({"success": True, "results": results})
 
@@ -693,6 +654,53 @@ def create_app(config: dict, db_conn) -> Flask:
 
         return jsonify({"success": True, "deleted_id": report_id})
 
+    @app.route("/focus/bulk-delete", methods=["POST"])
+    def focus_bulk_delete():
+        """수동 기사/보고서를 일괄 삭제한다."""
+        data = request.get_json(force=True)
+        article_ids = data.get("article_ids", [])
+        report_ids = data.get("report_ids", [])
+        deleted = 0
+
+        db = get_db()
+        for aid in article_ids:
+            aid = (aid or "").strip()
+            if not aid:
+                continue
+            try:
+                if delete_manual_article(db, aid):
+                    deleted += 1
+            except Exception as e:
+                logger.warning("bulk-delete 기사 삭제 실패 id=%s: %s", aid, e)
+
+        for rid in report_ids:
+            rid = (rid or "").strip()
+            if not rid:
+                continue
+            try:
+                row = delete_manual_report(db, rid)
+                if row is not None:
+                    deleted += 1
+                    # 부수 파일 삭제
+                    try:
+                        base = MANUAL_REPORTS_DIR.resolve()
+                        for key in ("file_path", "text_path"):
+                            val = (row.get(key) or "").strip()
+                            if not val:
+                                continue
+                            p = Path(val).resolve()
+                            try:
+                                p.relative_to(base)
+                            except ValueError:
+                                continue
+                            p.unlink(missing_ok=True)
+                    except Exception as e:
+                        logger.warning("bulk-delete 보고서 파일 정리 실패 id=%s: %s", rid, e)
+            except Exception as e:
+                logger.warning("bulk-delete 보고서 삭제 실패 id=%s: %s", rid, e)
+
+        return jsonify({"success": True, "deleted": deleted})
+
     @app.errorhandler(413)
     def too_large(_e):
         return jsonify({
@@ -785,18 +793,7 @@ def create_app(config: dict, db_conn) -> Flask:
         date_display = get_kst_display_date()
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        results = {"email": None, "backup": None, "git_sync": None}
-
-        # P0(2026-05-13): publish 직전 git pull. 충돌 시 발송 차단.
-        git_sync = GitSync(BASE_DIR, cfg)
-        try:
-            git_sync.pull_or_fail()
-        except GitSyncError as e:
-            logger.error("git_sync pull 실패 — Focus 발송 차단: %s", e)
-            return jsonify({
-                "success": False,
-                "error": f"git_sync pull 실패 (수동 해결 필요): {e}",
-            }), 409
+        results = {"email": None, "backup": None}
 
         # ── Step 4: Gmail 발송 ──
         try:
@@ -839,14 +836,6 @@ def create_app(config: dict, db_conn) -> Flask:
 
         # ── 발송 이력 기록 ──
         log_newsletter(db, "focus", 0, len(recipients), "success")
-
-        # P0(2026-05-13): data/ 변경분 git commit + push. push 실패는 warn만.
-        try:
-            results["git_sync"] = git_sync.commit_and_push("focus", date_str)
-        except Exception as e:
-            logger.warning("git_sync commit/push 예외 (발송은 완료): %s", e)
-            results["git_sync"] = {"committed": False, "pushed": False,
-                                   "skipped": "exception", "error": str(e)}
 
         return jsonify({"success": True, "results": results})
 

@@ -25,7 +25,6 @@ from src.news_service import GNewsService
 from src.claude_service import ClaudeService
 from src.email_template import render_email_html, build_email_subject
 from src.gmail_service import GmailService
-from src.git_sync import GitSync, GitSyncError
 from src.industry_scan_service import (
     IndustryScanService, IndustryScanError, extract_article_urls,
 )
@@ -100,17 +99,6 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
 
     if cron and check_today_sent(db_conn, "daily"):
         logger.info("오늘 Daily 이미 발송됨 - 파이프라인 스킵 (cron 멱등성 가드)")
-        return
-
-    # P0(2026-05-13): publish 직전 git pull로 멀티 PC fresh state 보장.
-    # rebase 충돌 시 발송 차단 (수동 해결 후 재실행 필요).
-    git_sync = GitSync(BASE_DIR, config)
-    try:
-        git_sync.pull_or_fail()
-    except GitSyncError as e:
-        logger.error("git_sync pull 실패 — Daily 발송 차단: %s", e)
-        log_newsletter(db_conn, "daily", 0, 0, "failed",
-                       error_message=f"git_sync pull 실패: {e}")
         return
 
     date_str = get_kst_date_str()
@@ -235,13 +223,6 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
             logger.info("A' 본문에서 인용 URL %d건 추출 → archive", len(archive_rows))
     if archive_rows:
         archive_articles(db_conn, date_str, "daily", archive_rows)
-
-    # P0(2026-05-13): 발행 결과물(.md, .csv) git 자동 commit + push.
-    # push 실패는 warn만 (commit은 보존, 다음 실행에서 재전송).
-    try:
-        git_sync.commit_and_push("daily", date_str)
-    except Exception as e:
-        logger.warning("git_sync commit/push 단계 예외 (발송은 완료): %s", e)
 
     logger.info("Daily 파이프라인 완료 (status=%s)", send_status)
 
