@@ -49,6 +49,11 @@ echo [STEP 3/5] Python 설치 확인 중...
 call "%~dp0install_python.bat"
 if errorlevel 1 goto :fail
 
+REM install_python.bat 의 setlocal 로 PATH 가 복원되므로 여기서 다시 갱신
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "PATH=%%B;%PATH%"
+set "PYTHON_HOME=%LOCALAPPDATA%\Programs\Python\Python311"
+if exist "%PYTHON_HOME%\python.exe" set "PATH=%PYTHON_HOME%;%PYTHON_HOME%\Scripts;%PATH%"
+
 REM ── 4. venv 생성 + 의존성 설치 ──
 if not exist ".venv\Scripts\python.exe" (
     echo [STEP 4/5] .venv 가상환경 생성 중...
