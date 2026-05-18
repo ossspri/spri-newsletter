@@ -3,7 +3,8 @@
 # 사용법 (메인 운영자 PC 의 PowerShell 에서):
 #   PS> .\scripts\win\build_portable_zip.ps1
 #   PS> .\scripts\win\build_portable_zip.ps1 -OutputDir "C:\release"
-#   PS> .\scripts\win\build_portable_zip.ps1 -IncludeVenv      # .venv-win 동봉
+#   PS> .\scripts\win\build_portable_zip.ps1 -IncludeVenv           # .venv-win 동봉
+#   PS> .\scripts\win\build_portable_zip.ps1 -IncludeCredentials    # 팀 Gmail OAuth client JSON 동봉
 #
 # 산출물:
 #   <OutputDir>\spri-newsletter-v<YYYYMMDD>.zip
@@ -20,6 +21,7 @@
 param(
     [string]$OutputDir = ".\dist",
     [switch]$IncludeVenv = $false,
+    [switch]$IncludeCredentials = $false,
     [switch]$KeepStaging = $false
 )
 
@@ -67,6 +69,18 @@ if (Test-Path $CredDir) {
 }
 else {
     New-Item -ItemType Directory -Force -Path $CredDir | Out-Null
+}
+
+# ── 3-1. (옵션) 팀 Gmail OAuth client JSON 동봉 ──
+if ($IncludeCredentials) {
+    $SrcCred = Join-Path $RepoRoot "credentials\google_credentials.json"
+    if (Test-Path $SrcCred) {
+        Copy-Item $SrcCred -Destination (Join-Path $CredDir "google_credentials.json") -Force
+        Write-Host "       google_credentials.json 동봉 완료"
+    }
+    else {
+        Write-Host "[WARN] -IncludeCredentials 지정했으나 $SrcCred 가 없습니다. 건너뜁니다."
+    }
 }
 
 # ── 4. 시드 데이터 비우기 ──

@@ -182,7 +182,8 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
     # ── Step 6: Google 인증 (Gmail 발송용) ──
     creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
     token_path = str(BASE_DIR / "credentials" / "google_token.json")
-    creds = get_google_credentials(creds_path, token_path)
+    ssl_verify = config.get("network", {}).get("ssl_verify", True)
+    creds = get_google_credentials(creds_path, token_path, ssl_verify=ssl_verify)
 
     # ── Step 7: 마크다운 → HTML 변환 ──
     html_body = render_email_html(markdown_body, "daily", date_display)
@@ -190,7 +191,7 @@ def run_daily_pipeline(config: dict, db_conn, cron: bool = False) -> None:
 
     # ── Step 8: Gmail API 발송 ──
     try:
-        gmail = GmailService(creds)
+        gmail = GmailService(creds, ssl_verify=ssl_verify)
         gmail.send_email(recipients, subject, html_body)
         send_status = "success"
         error_msg = None
@@ -297,8 +298,9 @@ def _try_attach_gmail(config: dict, db_conn) -> None:
     try:
         creds_path = str(BASE_DIR / "credentials" / "google_credentials.json")
         token_path = str(BASE_DIR / "credentials" / "google_token.json")
-        creds = get_google_credentials(creds_path, token_path)
-        db_conn.attach_gmail(GmailService(creds))
+        ssl_v = config.get("network", {}).get("ssl_verify", True)
+        creds = get_google_credentials(creds_path, token_path, ssl_verify=ssl_v)
+        db_conn.attach_gmail(GmailService(creds, ssl_verify=ssl_v))
         logger.info("Gmail dedup 활성")
     except Exception as e:
         logger.warning("Gmail dedup 비활성 (creds/Gmail 초기화 실패: %s) — CSV fallback", e)
@@ -325,6 +327,11 @@ def main():
 
     # 설정 로드
     config = load_config()
+
+    # SSL 검증 비활성화 (사내 프록시 SSL inspection 환경)
+    if not config.get("network", {}).get("ssl_verify", True):
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # 로깅 설정
     setup_logging(config)

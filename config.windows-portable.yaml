@@ -11,6 +11,12 @@
 #   - features.gmail_dedup: true     (Gmail Sent 가 진실의 원천 — 유지)
 #   - recipients.daily/weekly/focus: 빈 리스트 (동료가 직접 입력)
 
+# ── 팀 공용 Gmail ──
+# 이 배포판은 팀 공용 Gmail 계정으로 뉴스레터를 발송합니다.
+# setup_local.bat 의 OAuth 인증 시 반드시 팀 공용 Gmail로 로그인하세요.
+# sender="me" 가 인증된 계정의 주소로 자동 발송합니다.
+# 잘못된 계정으로 인증한 경우: credentials\google_token.json 삭제 후 재인증.
+
 # ── 뉴스 수집 ──
 gnews:
   queries:
@@ -82,6 +88,12 @@ recipients:
 web_ui:
   host: "127.0.0.1"
   port: 5000
+
+# ── Network ──
+# Corporate proxy SSL inspection bypass.
+# Set to false when the corporate proxy re-signs HTTPS with its own cert.
+network:
+  ssl_verify: false
 
 # ── Feature flags ──
 features:

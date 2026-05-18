@@ -118,7 +118,7 @@ def sanitize_filename(name: str, max_length: int = 128) -> str:
     return cleaned
 
 
-def detect_url_kind(url: str, timeout: float = 10.0) -> str:
+def detect_url_kind(url: str, timeout: float = 10.0, ssl_verify: bool = True) -> str:
     """URL의 컨텐츠 종류를 ``'html'`` 또는 ``'pdf'``로 판별한다.
 
     1차로 URL 경로가 .pdf로 끝나면 즉시 'pdf' 반환 (네트워크 부담 회피).
@@ -147,6 +147,7 @@ def detect_url_kind(url: str, timeout: float = 10.0) -> str:
             url,
             timeout=timeout,
             allow_redirects=True,
+            verify=ssl_verify,
             headers={"User-Agent": "Mozilla/5.0 (compatible; SPRi-Newsletter/1.0)"},
         )
     except requests.RequestException as e:
@@ -174,6 +175,7 @@ def download_pdf(
     out_path: Path,
     max_bytes: int = DEFAULT_MAX_PDF_BYTES,
     timeout: float = 30.0,
+    ssl_verify: bool = True,
 ) -> Path:
     """PDF URL을 스트리밍으로 다운로드하여 ``out_path``에 저장한다.
 
@@ -201,6 +203,7 @@ def download_pdf(
         url,
         timeout=timeout,
         stream=True,
+        verify=ssl_verify,
         headers={"User-Agent": "Mozilla/5.0 (compatible; SPRi-Newsletter/1.0)"},
     )
     resp.raise_for_status()
