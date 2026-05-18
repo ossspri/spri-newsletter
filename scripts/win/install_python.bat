@@ -1,16 +1,16 @@
 @echo off
-REM SPRi Newsletter — Python auto-install script
+REM SPRi Newsletter ? Python auto-install script
 REM Called by setup_local.bat. Downloads and installs Python if not found.
 chcp 65001 >nul
 
 setlocal
 
-REM ── Config ──
+REM ?? Config ??
 set PYTHON_VERSION=3.11.9
 set PYTHON_URL=https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-amd64.exe
 set INSTALLER=%TEMP%\python-%PYTHON_VERSION%-amd64.exe
 
-REM ── 1. Check if Python is already installed ──
+REM ?? 1. Check if Python is already installed ??
 python --version >nul 2>&1
 if not errorlevel 1 (
     echo [Python] Already installed:
@@ -28,7 +28,7 @@ if not errorlevel 1 (
     exit /b 0
 )
 
-REM ── 2. Python not found — download + install ──
+REM ?? 2. Python not found ? download + install ??
 echo.
 echo ============================================================
 echo  Python %PYTHON_VERSION% Auto Install
@@ -38,7 +38,7 @@ echo  Python is not installed.
 echo  Downloading from python.org ...
 echo.
 
-REM ── 3. Download ──
+REM ?? 3. Download ??
 echo [1/3] Downloading Python %PYTHON_VERSION% ...
 echo       URL: %PYTHON_URL%
 echo.
@@ -68,7 +68,7 @@ if %FILESIZE% LSS 1000000 (
     exit /b 1
 )
 
-REM ── 4. Silent Install ──
+REM ?? 4. Silent Install ??
 echo [2/3] Installing Python %PYTHON_VERSION% ... (1-2 min)
 echo.
 
@@ -82,7 +82,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ── 5. Refresh PATH for current session ──
+REM ?? 5. Refresh PATH for current session ??
 echo [3/3] Refreshing PATH ...
 
 for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "USER_PATH=%%B"
@@ -93,7 +93,7 @@ if exist "%PYTHON_HOME%\python.exe" (
     set "PATH=%PYTHON_HOME%;%PYTHON_HOME%\Scripts;%PATH%"
 )
 
-REM ── 6. Verify ──
+REM ?? 6. Verify ??
 python --version >nul 2>&1
 if errorlevel 1 (
     py -3 --version >nul 2>&1
@@ -113,7 +113,7 @@ python --version
 pip --version
 echo.
 
-REM ── 7. Cleanup ──
+REM ?? 7. Cleanup ??
 del "%INSTALLER%" >nul 2>&1
 
 endlocal
