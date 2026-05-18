@@ -5,13 +5,17 @@ Daily 탭: 뉴스 수집 → 생성 → 미리보기 → 발간(Gmail 발송)
 Weekly 탭: 자동 daily 기사 선택 → 생성 → 발간 (표준)
 Focus 탭: 수동 기사·보고서·전문가 인사이트·편집 미리보기 → 발간 (큐레이션)
 """
+import base64
 import json
 import logging
+import mimetypes
 import os
+import re as _re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_from_directory
 
 from src.db import (
     insert_daily_articles,
@@ -53,6 +57,8 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 FOCUS_RECIPIENTS_PATH = BASE_DIR / "data" / "focus_recipients.json"
+FOCUS_IMAGES_DIR = BASE_DIR / "data" / "focus_images"
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
 def load_focus_recipients():
@@ -67,7 +73,32 @@ def save_focus_recipients(emails):
     )
 
 
-def extract_url_metadata(url: str) -> dict:
+def _embed_local_images_as_base64(html: str) -> str:
+    """HTML 내 /focus/images/ 경로를 base64 data URI로 변환하고 이미지 크기를 제한한다."""
+    def _replace_src(match):
+        filename = match.group(1)
+        filepath = FOCUS_IMAGES_DIR / filename
+        if not filepath.exists():
+            return match.group(0)
+        mime = mimetypes.guess_type(str(filepath))[0] or "image/png"
+        b64 = base64.b64encode(filepath.read_bytes()).decode()
+        return f'src="data:{mime};base64,{b64}"'
+
+    html = _re.sub(r'src="/focus/images/([^"]+)"', _replace_src, html)
+
+    def _fix_img_style(match):
+        tag = match.group(0)
+        if 'max-width:636px' in tag or 'max-width: 636px' in tag:
+            return tag
+        if 'style="' in tag:
+            return tag.replace('style="', 'style="display:block; margin:0 auto; width:100%; max-width:636px; height:auto; box-sizing:border-box; ')
+        return tag.replace('<img ', '<img style="display:block; margin:0 auto; width:100%; max-width:636px; height:auto; box-sizing:border-box;" ')
+
+    html = _re.sub(r'<img [^>]*src="data:image/[^>]+>', _fix_img_style, html)
+    return html
+
+
+def extract_url_metadata(url: str, ssl_verify: bool = True) -> dict:
     """URL에서 메타데이터(제목, 설명)를 추출한다.
 
     beautifulsoup4를 사용하여 og:title, og:description 또는 <title> 태그를 추출.
@@ -76,7 +107,7 @@ def extract_url_metadata(url: str) -> dict:
     from bs4 import BeautifulSoup
 
     try:
-        resp = requests.get(url, timeout=10, headers={
+        resp = requests.get(url, timeout=10, verify=ssl_verify, headers={
             "User-Agent": "Mozilla/5.0 (compatible; SPRi-Newsletter/1.0)"
         })
         resp.raise_for_status()
@@ -127,6 +158,9 @@ def create_app(config: dict, db_conn) -> Flask:
 
     def get_cfg():
         return app.config["config"]
+
+    def get_ssl_verify():
+        return get_cfg().get("network", {}).get("ssl_verify", True)
 
     @app.context_processor
     def inject_ui_flags():
@@ -269,8 +303,8 @@ def create_app(config: dict, db_conn) -> Flask:
             html_body = render_email_html(markdown, "daily", date_display)
             subject = build_email_subject("daily", date_str)
 
-            creds = get_google_credentials(creds_path, token_path)
-            gmail = GmailService(creds)
+            creds = get_google_credentials(creds_path, token_path, ssl_verify=get_ssl_verify())
+            gmail = GmailService(creds, ssl_verify=get_ssl_verify())
             gmail.send_email(recipients, subject, html_body)
             results["email"] = {"success": True, "recipients": len(recipients)}
             logger.info("이메일 발송 완료 (%d명)", len(recipients))
@@ -385,8 +419,8 @@ def create_app(config: dict, db_conn) -> Flask:
             html_body = render_email_html(markdown, "weekly", date_display)
             subject = build_email_subject("weekly", date_str)
 
-            creds = get_google_credentials(creds_path, token_path)
-            gmail = GmailService(creds)
+            creds = get_google_credentials(creds_path, token_path, ssl_verify=get_ssl_verify())
+            gmail = GmailService(creds, ssl_verify=get_ssl_verify())
             gmail.send_email(recipients, subject, html_body)
             results["email"] = {"success": True, "recipients": len(recipients)}
             logger.info("주간 이메일 발송 완료 (%d명)", len(recipients))
@@ -457,7 +491,7 @@ def create_app(config: dict, db_conn) -> Flask:
         if not url:
             return jsonify({"success": False, "error": "URL이 필요합니다."}), 400
 
-        meta = extract_url_metadata(url)
+        meta = extract_url_metadata(url, ssl_verify=get_ssl_verify())
         title = data.get("title") or meta["title"]
         description = data.get("description") or meta["description"]
 
@@ -552,12 +586,12 @@ def create_app(config: dict, db_conn) -> Flask:
                 if not is_safe_url(url):
                     return jsonify({"success": False, "error": "안전하지 않은 URL입니다."}), 400
 
-                kind = detect_url_kind(url)
+                kind = detect_url_kind(url, ssl_verify=get_ssl_verify())
                 if kind == "pdf":
                     source_type = "pdf"
                     pdf_path = MANUAL_REPORTS_DIR / f"{report_id}.pdf"
                     try:
-                        download_pdf(url, pdf_path)
+                        download_pdf(url, pdf_path, ssl_verify=get_ssl_verify())
                     except ValueError as ve:
                         return jsonify({"success": False, "error": str(ve)}), 400
                     file_path_str = str(pdf_path)
@@ -571,7 +605,7 @@ def create_app(config: dict, db_conn) -> Flask:
                 else:
                     # HTML 페이지
                     source_type = "url"
-                    meta = extract_url_metadata(url)
+                    meta = extract_url_metadata(url, ssl_verify=get_ssl_verify())
                     title = meta["title"] or url
                     full_text = meta.get("description", "") or ""
                     head_excerpt = full_text
@@ -808,6 +842,36 @@ def create_app(config: dict, db_conn) -> Flask:
         save_focus_recipients(emails)
         return jsonify({"success": True, "recipients": emails})
 
+    @app.route("/focus/upload-image", methods=["POST"])
+    def focus_upload_image():
+        """이미지를 업로드하고 서빙 가능한 URL을 반환한다."""
+        if "file" not in request.files:
+            return jsonify({"success": False, "error": "파일이 없습니다."}), 400
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"success": False, "error": "파일명이 없습니다."}), 400
+
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+            return jsonify({"success": False, "error": f"허용되지 않는 형식: {ext}"}), 400
+
+        data = file.read()
+        if len(data) > 5 * 1024 * 1024:
+            return jsonify({"success": False, "error": "5MB 이하만 허용됩니다."}), 400
+
+        FOCUS_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = FOCUS_IMAGES_DIR / filename
+        filepath.write_bytes(data)
+
+        url = f"/focus/images/{filename}"
+        return jsonify({"success": True, "url": url, "filename": filename})
+
+    @app.route("/focus/images/<filename>")
+    def focus_serve_image(filename):
+        """업로드된 이미지를 서빙한다."""
+        return send_from_directory(str(FOCUS_IMAGES_DIR), filename)
+
     @app.route("/focus/publish", methods=["POST"])
     def focus_publish():
         """Focus 보고서를 발간한다 (Gmail 발송 → 로컬 백업).
@@ -838,17 +902,16 @@ def create_app(config: dict, db_conn) -> Flask:
             if not recipients:
                 return jsonify({"success": False, "error": "수신자가 지정되지 않았습니다."}), 400
             if edited_html:
-                # 사용자가 미리보기 편집 → 그 HTML 을 그대로 발송
-                # (제거됨, 2026-05-15) 이전엔 Drive 링크 갱신을 시도했으나 통합 제거됨
                 html_body = edited_html
                 logger.info("Focus 발송: 사용자 편집 HTML 사용 (%d자)", len(edited_html))
             else:
                 html_body = render_email_html(markdown, "focus", date_display)
                 logger.info("Focus 발송: markdown→HTML 렌더 사용")
+            html_body = _embed_local_images_as_base64(html_body)
             subject = build_email_subject("focus", date_str)
 
-            creds = get_google_credentials(creds_path, token_path)
-            gmail = GmailService(creds)
+            creds = get_google_credentials(creds_path, token_path, ssl_verify=get_ssl_verify())
+            gmail = GmailService(creds, ssl_verify=get_ssl_verify())
             gmail.send_email(recipients, subject, html_body)
             results["email"] = {"success": True, "recipients": len(recipients)}
             logger.info("Focus 이메일 발송 완료 (%d명)", len(recipients))

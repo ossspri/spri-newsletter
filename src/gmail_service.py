@@ -9,6 +9,8 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import httplib2
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
@@ -17,13 +19,19 @@ logger = logging.getLogger(__name__)
 class GmailService:
     """Gmail API를 사용한 이메일 발송 서비스."""
 
-    def __init__(self, credentials):
+    def __init__(self, credentials, ssl_verify: bool = True):
         """Gmail API 서비스를 초기화한다.
 
         Args:
             credentials: Google OAuth2 Credentials 객체
+            ssl_verify: False면 SSL 인증서 검증 비활성화 (사내 프록시용)
         """
-        self.service = build("gmail", "v1", credentials=credentials)
+        if not ssl_verify:
+            http = httplib2.Http(disable_ssl_certificate_validation=True)
+            authed_http = AuthorizedHttp(credentials, http=http)
+            self.service = build("gmail", "v1", http=authed_http)
+        else:
+            self.service = build("gmail", "v1", credentials=credentials)
 
     def send_email(
         self,

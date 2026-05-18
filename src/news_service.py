@@ -21,6 +21,7 @@ class GNewsService:
         self.fallback_queries = gnews_cfg.get("fallback_queries", [])
         self.min_articles = gnews_cfg.get("min_articles", 0)
         self.max_articles = config.get("newsletter", {}).get("max_articles", 25)
+        self.ssl_verify = config.get("network", {}).get("ssl_verify", True)
         self.api_key = api_key
 
     def fetch_articles(self) -> list[dict]:
@@ -86,7 +87,7 @@ class GNewsService:
         if self.search_in:
             params["in"] = self.search_in
 
-        resp = requests.get(GNEWS_API_URL, params=params, timeout=30)
+        resp = requests.get(GNEWS_API_URL, params=params, timeout=30, verify=self.ssl_verify)
         resp.raise_for_status()
 
         data = resp.json()

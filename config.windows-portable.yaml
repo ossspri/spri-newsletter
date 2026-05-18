@@ -89,6 +89,12 @@ web_ui:
   host: "127.0.0.1"
   port: 5000
 
+# ── Network ──
+# Corporate proxy SSL inspection bypass.
+# Set to false when the corporate proxy re-signs HTTPS with its own cert.
+network:
+  ssl_verify: false
+
 # ── Feature flags ──
 features:
   # Gmail Sent dedup 활성 (멀티 PC 안전. 단일 PC 환경에서도 무해).

@@ -8,6 +8,7 @@ import logging
 import re
 
 import anthropic
+import httpx
 
 from src.prompts import (
     build_daily_prompt,
@@ -25,7 +26,12 @@ class ClaudeService:
         newsletter_cfg = config.get("newsletter", {})
         self.model = newsletter_cfg.get("model", "claude-sonnet-4-20250514")
         self.max_tokens = newsletter_cfg.get("max_tokens", 4096)
-        self.client = anthropic.Anthropic(api_key=api_key)
+        ssl_verify = config.get("network", {}).get("ssl_verify", True)
+        if not ssl_verify:
+            http_client = httpx.Client(verify=False)
+            self.client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
+        else:
+            self.client = anthropic.Anthropic(api_key=api_key)
 
     def generate_daily(self, articles: list[dict], existing_summaries: str = "") -> str:
         """Daily 뉴스레터 마크다운을 생성한다.

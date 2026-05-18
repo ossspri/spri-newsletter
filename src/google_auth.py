@@ -7,8 +7,10 @@ credentials/google_credentials.json → google_token.json 흐름.
 Drive/NotebookLM 통합 제거와 함께 Gmail scope 2개만 남았다.
 """
 import logging
+import os
 from pathlib import Path
 
+import requests as _requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -29,6 +31,7 @@ SCOPES = [
 def get_google_credentials(
     credentials_path: str = "credentials/google_credentials.json",
     token_path: str = "credentials/google_token.json",
+    ssl_verify: bool = True,
 ) -> Credentials:
     """Google OAuth2 자격증명을 로드하거나 새로 발급한다.
 
@@ -48,12 +51,20 @@ def get_google_credentials(
         creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
         logger.info("기존 토큰 로드: %s", token_path)
 
+    # SSL 검증 비활성화용 세션 (사내 프록시 SSL inspection 환경)
+    if not ssl_verify:
+        auth_session = _requests.Session()
+        auth_session.verify = False
+        auth_request = Request(session=auth_session)
+    else:
+        auth_request = Request()
+
     # 토큰 갱신 또는 새로 발급
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
                 logger.info("토큰 갱신 중...")
-                creds.refresh(Request())
+                creds.refresh(auth_request)
             except Exception as e:
                 logger.warning("토큰 갱신 실패, 재인증 진행: %s", e)
                 creds = None
@@ -67,6 +78,12 @@ def get_google_credentials(
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(creds_file), SCOPES
             )
+            # ssl_verify=False 시, flow 내부 token exchange도 SSL 우회
+            if not ssl_verify:
+                os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+                # flow 내부 OAuth2Session(=requests.Session 서브클래스)의 verify 비활성화
+                if hasattr(flow, "oauth2session"):
+                    flow.oauth2session.verify = False
             creds = flow.run_local_server(port=0)
 
         # 토큰 저장
