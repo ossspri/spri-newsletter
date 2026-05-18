@@ -43,7 +43,7 @@ echo [1/3] Downloading Python %PYTHON_VERSION% ...
 echo       URL: %PYTHON_URL%
 echo.
 
-curl -L -o "%INSTALLER%" "%PYTHON_URL%" --progress-bar
+curl -L -o "%INSTALLER%" "%PYTHON_URL%" --progress-bar --ssl-no-revoke
 if errorlevel 1 (
     echo.
     echo [ERROR] Download failed. Check internet or proxy settings.
