@@ -135,6 +135,12 @@
     <div id="focus-recipients-list" class="recipients-tags"></div>
   </div>
   <div class="preview-editable-hint">✏️ 아래 미리보기를 직접 클릭하여 문구를 수정할 수 있습니다. 편집 내용은 발간 시 그대로 이메일로 발송됩니다.</div>
+  <!-- 이미지 삽입 툴바 -->
+  <div class="image-toolbar" id="image-toolbar">
+    <button class="btn btn-secondary btn-small" onclick="triggerImageUpload()">🖼️ 이미지 삽입</button>
+    <input type="file" id="image-upload-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="handleImageUpload(this)">
+    <span class="image-toolbar-hint">커서 위치에 이미지가 삽입됩니다 (최대 5MB)</span>
+  </div>
   <div id="weekly-preview-container" class="preview-frame preview-editable" contenteditable="false">
     <p class="empty-state">보고서를 생성하면 미리보기가 표시됩니다.</p>
   </div>
@@ -150,6 +156,11 @@
 .tag-remove { background: none; border: none; color: #d93025; font-size: 1.1rem; cursor: pointer; padding: 0 0.2rem; line-height: 1; }
 .tag-remove:hover { color: #a50e0e; }
 .btn-delete-selected { color: #ff8a80 !important; }
+.image-toolbar { display: flex; align-items: center; gap: 0.75rem; margin: 0 1.5rem; padding: 0.6rem 0; border-bottom: 1px solid #eee; }
+.image-toolbar-hint { font-size: 0.8rem; color: #888; }
+.preview-frame figure { margin: 20px 0; text-align: center; page-break-inside: avoid; }
+.preview-frame figure img { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #eee; }
+.preview-frame figure figcaption { font-size: 12px; color: #888; margin-top: 6px; font-style: italic; }
 </style>
 {% endblock %}
 
@@ -206,6 +217,79 @@
   });
 
   let weeklyMarkdown = '';
+
+  // ── 이미지 삽입 ──
+  let _savedSelection = null;
+
+  // 미리보기 영역에서 포커스가 빠지기 전에 커서 위치를 저장
+  document.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('weekly-preview-container');
+    container.addEventListener('blur', () => {
+      const sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        _savedSelection = sel.getRangeAt(0).cloneRange();
+      }
+    });
+  });
+
+  function triggerImageUpload() {
+    // 현재 선택 범위 저장 (버튼 클릭으로 포커스 이동 전)
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0) {
+      const container = document.getElementById('weekly-preview-container');
+      if (container.contains(sel.anchorNode)) {
+        _savedSelection = sel.getRangeAt(0).cloneRange();
+      }
+    }
+    document.getElementById('image-upload-input').click();
+  }
+
+  async function handleImageUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('5MB 이하 이미지만 업로드 가능합니다.', true);
+      input.value = '';
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append('file', file);
+
+    try {
+      const resp = await fetch('/focus/upload-image', { method: 'POST', body: fd });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        showToast(data.error || '이미지 업로드 실패', true);
+        return;
+      }
+      insertImageAtCursor(data.url, file.name);
+      showToast('이미지가 삽입되었습니다.');
+    } catch (e) {
+      showToast('이미지 업로드 오류: ' + e.message, true);
+    } finally {
+      input.value = '';
+    }
+  }
+
+  function insertImageAtCursor(url, altText) {
+    const container = document.getElementById('weekly-preview-container');
+    container.focus();
+
+    const figureHtml = `<figure style="margin:20px 0; padding:0; text-align:center; max-width:100%; box-sizing:border-box; overflow:hidden;">` +
+      `<img src="${url}" alt="${altText || ''}" style="display:block; margin:0 auto; width:100%; max-width:636px; height:auto; border-radius:4px; border:1px solid #eee; box-sizing:border-box;">` +
+      `<figcaption style="font-size:12px; color:#888; margin-top:6px; font-style:italic;">` +
+      `(캡션을 입력하세요)</figcaption></figure><p><br></p>`;
+
+    if (_savedSelection) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(_savedSelection);
+      _savedSelection = null;
+    }
+
+    document.execCommand('insertHTML', false, figureHtml);
+  }
 
   function getSelectedArticles() {
     const checks = document.querySelectorAll('.article-check:checked');
@@ -547,8 +631,8 @@
         }),
       });
       const r = data.results;
-      showToast(`✅ 뉴스레터 발송 성공! (${r.email.recipients}명)`);
-      location.reload();
+      showToast(`✅ 뉴스레터 발송 완료! (${r.email.recipients}명)`);
+      setTimeout(() => location.reload(), 3000);
     } catch (e) {
       showToast(e.message, true);
     } finally {
