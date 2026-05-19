@@ -11,44 +11,47 @@
 ## 1. 사전 요구사항
 - Windows 10 또는 11
 - 설치 경로에 **한글이 포함되지 않아야** 합니다
-  - 권장 (자동 설치 위치): `C:\spri-newsletter\`
+  - 부트스트랩 파일(`setup_local.bat`) 보관 경로: 권장 `C:\spri-bootstrap\`
+  - 자동 clone 위치: `C:\spri-newsletter\` (스크립트가 자동 생성)
 - 인터넷 접속 (사내 프록시 사용 시 `docs\TROUBLESHOOTING.md` 참고)
-- 메인PC로부터 메일 전달된 첨부파일 2개: `.env`, `google_credentials.json`
-- 메일발송용 부서공용 gmail 접속 (개인 gmail 로 발송불가)
+- 메인 PC 관리자가 메일로 전달한 첨부파일 3개: **`setup_local.bat`, `.env`, `google_credentials.json`**
+- 메일 발송용 부서 공용 Gmail 접속 정보 (개인 Gmail 로는 발송 불가)
+- **GitHub 계정 불필요** (public 저장소이므로 로그인·가입 없이 익명 접근으로 다운로드/clone 됩니다)
 
 ---
 
-## 2. 부트스트랩 (`setup_local.bat` 한 파일 다운로드 → 더블클릭)
+## 2. 부트스트랩 (메일 첨부 `setup_local.bat` 더블클릭)
 
-`setup_local.bat` 한 파일이 다음을 **모두 자동** 처리합니다:
+메인 PC 관리자가 메일로 보낸 `setup_local.bat` 한 파일이 다음을 **모두 자동** 처리합니다:
 
 1. Git for Windows 설치 (미설치 시)
 2. `https://github.com/ossspri/spri-newsletter` → `C:\spri-newsletter\` 로 `git clone`
 3. 시크릿 파일 배치 대기 ([3장](#3-시크릿-배치-메일-첨부-파일-2개))
 4. Python·`.venv`·의존성 자동 설치 + OAuth 첫 동의 ([4장](#4-본-셋업-자동-진행-내용))
 
-### 2-1. setup_local.bat 다운로드
+### 2-1. setup_local.bat 저장
 
-- **방법 A**: 브라우저로 아래 URL 우클릭 → **다른 이름으로 링크 저장** → 파일명 `setup_local.bat` 로 바탕화면에 저장
-  ```
-  https://raw.githubusercontent.com/ossspri/spri-newsletter/main/scripts/win/setup_local.bat
-  ```
-- **방법 B**: cmd 한 줄
-  ```
-  curl -L -o "%USERPROFILE%\Desktop\setup_local.bat" https://raw.githubusercontent.com/ossspri/spri-newsletter/main/scripts/win/setup_local.bat
-  ```
+1. 탐색기에서 부트스트랩 보관용 폴더를 새로 만듭니다. **반드시 폴더 경로에 한글이 포함되지 않아야** 합니다.
+   - 권장: `C:\spri-bootstrap\`
+   - 비권장: `C:\사용자\<이름>\바탕화면\` 등 한글 포함 경로 (Windows cp949 인코딩 충돌)
+2. 받은 메일에서 첨부파일 **`setup_local.bat`** 을 **다른 이름으로 저장** → 위에서 만든 폴더(`C:\spri-bootstrap\`)에 저장합니다.
+
+> 같은 메일에 첨부된 `.env`, `google_credentials.json` 은 부트스트랩 도중에 별도 위치로 옮기게 됩니다 ([3장](#3-시크릿-배치-메일-첨부-파일-2개) 참고). 지금은 메일에 그대로 두고 진행하세요.
 
 ### 2-2. 더블클릭하여 실행
 
-저장한 `setup_local.bat` 을 더블클릭하면 콘솔 창에서 부트스트랩이 시작됩니다.
+저장한 `C:\spri-bootstrap\setup_local.bat` 을 더블클릭하면 콘솔 창에서 부트스트랩이 시작됩니다.
 
 - **Bootstrap 1/3**: Git 자동 설치 (Git for Windows 2.45.2 silent install). 이미 있으면 즉시 통과.
-- **Bootstrap 2/3**: `C:\spri-newsletter\` 에 저장소 clone
+- **Bootstrap 2/3**: `C:\spri-newsletter\` 에 저장소 clone (익명, GitHub 로그인 불필요)
 - **Bootstrap 3/3**: 시크릿 파일 배치 대기 → 다음 장 진행 후 아무 키나 눌러 계속
 
-> 바탕화면의 `setup_local.bat` 사본은 부트스트랩 1회용입니다. 저장소 내부에도 동일 파일이 있으니 완료 후 삭제해도 됩니다.
+> `C:\spri-bootstrap\` 폴더와 그 안의 `setup_local.bat` 사본은 부트스트랩 1회용입니다. 저장소 내부에도 동일 파일이 있으니 셋업 완료 후 폴더째 삭제해도 됩니다.
 >
-> **자동 Git 설치 실패 시**: 사내 프록시·다운로드 차단 등으로 자동 설치가 막히면 https://git-scm.com/download/win 에서 64-bit 인스톨러를 직접 받아 기본 옵션으로 설치 후 부트스트랩을 재실행하세요.
+> **자동 Git 설치 실패 시**: 사내 프록시·다운로드 차단 등으로 자동 설치가 막히면 https://git-scm.com/download/win 에서 64-bit 인스톨러를 직접 받아 기본 옵션으로 설치 후 `setup_local.bat` 을 다시 더블클릭하세요.
+>
+> **메일 첨부파일이 막힌 경우(스팸 필터 등)**: 관리자에게 문의하거나, 임시 대안으로 `setup_local.bat` 을 GitHub raw URL에서 직접 받을 수 있습니다.
+> 브라우저 우클릭 저장: <https://raw.githubusercontent.com/ossspri/spri-newsletter/main/scripts/win/setup_local.bat>
 
 ---
 

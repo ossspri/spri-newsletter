@@ -43,3 +43,7 @@ scripts/spri_task_backup.xml
 credentials/google_token.json
 credentials/google_credentials.json
 credentials/google_credentials*-*.json
+
+# Local doc copies with real secrets filled in (never push)
+*.local.md
+docs/*.local.md
