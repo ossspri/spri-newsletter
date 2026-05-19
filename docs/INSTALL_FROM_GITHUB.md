@@ -5,7 +5,6 @@
 > 산출 결과: `http://127.0.0.1:5000` 웹 UI 가 열리고, **Focus 탭**에서 Gmail 발송 가능
 
 이 문서는 신규 공개 저장소 `https://github.com/ossspri/spri-newsletter` 를 `git clone` 으로 받아 셋업하는 절차입니다.
-기존 zip 배포 방식 가이드는 `docs\DEPLOY_WINDOWS.md` 에 보존되어 있으니 백업으로 참고하세요.
 
 ---
 
@@ -13,93 +12,89 @@
 
 - Windows 10 또는 11
 - 설치 경로에 **한글이 포함되지 않아야** 합니다
-  - 권장: `C:\spri-newsletter\`
-  - 비권장: `C:\사용자\이름\바탕화면\...`
+  - 권장 (자동 설치 위치): `C:\spri-newsletter\`
 - 인터넷 접속 (사내 프록시 사용 시 `docs\TROUBLESHOOTING.md` 참고)
+- 메인 PC 관리자가 메일로 전달한 첨부파일 2개: `.env`, `google_credentials.json`
 
 ---
 
-## 2. Git for Windows 설치
+## 2. 부트스트랩 (`setup_local.bat` 한 파일 다운로드 → 더블클릭)
 
-1. https://git-scm.com/download/win 접속
-2. 64-bit 설치 파일 다운로드 후 실행
-3. **모든 옵션은 기본값**으로 두고 Next 클릭 (특히 PATH 옵션은 기본인 "Git from the command line..." 유지)
-4. 설치 완료 후 새 cmd 창에서 확인:
-   ```
-   git --version
-   ```
-   `git version 2.x.x ...` 가 출력되면 OK
+`setup_local.bat` 한 파일이 다음을 **모두 자동** 처리합니다:
 
-> 자동 설치 스크립트(`scripts\win\install_git.bat`)도 포함되어 있지만, **clone 전에는 Git이 먼저 있어야 하므로** 수동 설치를 권장합니다.
+1. Git for Windows 설치 (미설치 시)
+2. `https://github.com/ossspri/spri-newsletter` → `C:\spri-newsletter\` 로 `git clone`
+3. 시크릿 파일 배치 대기 ([3장](#3-시크릿-배치-메일-첨부-파일-2개))
+4. Python·`.venv`·의존성 자동 설치 + OAuth 첫 동의 ([4장](#4-본-셋업-자동-진행-내용))
 
----
+### 2-1. setup_local.bat 다운로드
 
-## 3. 저장소 clone
+- **방법 A**: 브라우저로 아래 URL 우클릭 → **다른 이름으로 링크 저장** → 파일명 `setup_local.bat` 로 바탕화면에 저장
+  ```
+  https://raw.githubusercontent.com/ossspri/spri-newsletter/main/scripts/win/setup_local.bat
+  ```
+- **방법 B**: cmd 한 줄
+  ```
+  curl -L -o "%USERPROFILE%\Desktop\setup_local.bat" https://raw.githubusercontent.com/ossspri/spri-newsletter/main/scripts/win/setup_local.bat
+  ```
 
-cmd 창을 열고 다음을 순서대로 실행:
+### 2-2. 더블클릭하여 실행
 
-```
-cd C:\
-git clone https://github.com/ossspri/spri-newsletter.git spri-newsletter
-cd spri-newsletter
-```
+저장한 `setup_local.bat` 을 더블클릭하면 콘솔 창에서 부트스트랩이 시작됩니다.
 
-이후 모든 작업은 `C:\spri-newsletter\` 폴더 기준입니다.
+- **Bootstrap 1/3**: Git 자동 설치 (Git for Windows 2.45.2 silent install). 이미 있으면 즉시 통과.
+- **Bootstrap 2/3**: `C:\spri-newsletter\` 에 저장소 clone
+- **Bootstrap 3/3**: 시크릿 파일 배치 대기 → 다음 장 진행 후 아무 키나 눌러 계속
 
----
-
-## 4. 시크릿 배치 (메일 첨부 파일 2개)
-
-메인 PC 관리자가 메일로 전달한 2개 파일을 다음 위치에 배치합니다.
-
-### 4-1. `.env`
-
-메일로 받은 `.env` 파일을 저장소 최상위에 배치(덮어쓰기)합니다.
-```
-C:\spri-newsletter\.env
-```
-
-> 저장소에는 `.env.example` (빈 템플릿) 만 있고, `.env` 자체는 git에서 제외되어 있습니다.
-
-### 4-2. `google_credentials.json`
-
-메일로 받은 OAuth Desktop client JSON 파일을 `credentials\` 폴더에 배치합니다.
-```
-C:\spri-newsletter\credentials\google_credentials.json
-```
-
-> `credentials\google_credentials.sample.json` 은 형식 참고용 placeholder입니다 (인증에 사용되지 않음). 실제 인증은 `google_credentials.json` 으로 이루어집니다.
+> 바탕화면의 `setup_local.bat` 사본은 부트스트랩 1회용입니다. 저장소 내부에도 동일 파일이 있으니 완료 후 삭제해도 됩니다.
+>
+> **자동 Git 설치 실패 시**: 사내 프록시·다운로드 차단 등으로 자동 설치가 막히면 https://git-scm.com/download/win 에서 64-bit 인스톨러를 직접 받아 기본 옵션으로 설치 후 부트스트랩을 재실행하세요.
 
 ---
 
-## 5. 초기 셋업 실행
+## 3. 시크릿 배치 (메일 첨부 파일 2개)
 
-탐색기에서 다음 파일을 **더블클릭**합니다.
-```
-scripts\win\setup_local.bat
-```
+**Bootstrap 3/3** 단계에서 콘솔이 입력을 기다리는 동안, 메일로 받은 두 파일을 다음 위치에 복사합니다.
 
-화면 안내(6단계) 그대로 진행하면 됩니다.
+| 파일 | 배치 위치 |
+| --- | --- |
+| `.env` | `C:\spri-newsletter\.env` |
+| `google_credentials.json` | `C:\spri-newsletter\credentials\google_credentials.json` |
 
-1. **Git 설치 확인** — 이미 설치되어 있으면 즉시 통과
-2. **.env 확인** — 없으면 메모장이 열림 (이미 배치했으면 통과)
-3. **credentials 확인** — `google_credentials.json` 존재 확인
-4. **Python 확인** — 미설치 시 자동 다운로드+설치 (1-2분)
-5. **.venv 생성 + 의존성 설치**
-6. **OAuth 첫 동의** — 브라우저가 자동으로 열립니다
-   - **반드시 팀 공용 Gmail 계정으로 로그인** 하세요
-   - 개인 Gmail이 Chrome에 로그인되어 있으면 **"다른 계정 사용"** 을 클릭
-   - 동의 후 브라우저 창은 그대로 두세요 (스크립트가 30초 후 자동 종료)
+두 파일이 모두 배치되면 콘솔 창에서 **아무 키나 누르면** 자동으로 다음(4장) 본 셋업으로 진행됩니다. 파일이 누락된 경우 경고가 표시되고 다시 대기 상태로 돌아갑니다.
+
+> 저장소에는 `.env.example` (빈 템플릿) 과 `credentials\google_credentials.sample.json` (형식 참고용 placeholder) 만 포함되어 있고, 실제 시크릿은 git에서 제외되어 있습니다.
+
+---
+
+## 4. 본 셋업 (자동 진행 내용)
+
+3장에서 키를 누르면 cloned 된 `C:\spri-newsletter\scripts\win\setup_local.bat` 이 자동으로 이어 실행되며 6단계를 진행합니다. **수동 작업은 STEP 6의 OAuth 동의 클릭뿐**입니다.
+
+| STEP | 동작 | 수동 작업 |
+| --- | --- | --- |
+| 1/6 | Git 설치 재확인 | — |
+| 2/6 | `.env` 확인 (없으면 메모장 열림) | — (3장에서 배치 완료) |
+| 3/6 | `credentials\google_credentials.json` 확인 | — |
+| 4/6 | Python 3.11 설치 확인 — 미설치 시 자동 다운로드+설치 (1-2분) | — |
+| 5/6 | `.venv` 생성 + `pip install -r requirements.txt` | — |
+| 6/6 | OAuth 첫 동의 — 브라우저 자동 오픈 | **팀 공용 Gmail로 로그인 후 동의 클릭** |
+
+### STEP 6 주의사항
+
+- **반드시 팀 공용 Gmail 계정으로 로그인** 하세요
+- 개인 Gmail이 Chrome에 로그인되어 있으면 **"다른 계정 사용"** 을 클릭
+- 동의 후 브라우저 창은 그대로 두세요 (스크립트가 30초 후 자동 종료)
 
 성공 시 `credentials\google_token.json` 이 생성됩니다. **이 파일은 이 PC 전용**이며, 다른 PC의 token을 복사해 쓰지 마세요.
 
 ---
 
-## 6. 서버 시작 & Focus 탭 확인
+## 5. 서버 시작 & Focus 탭 확인
 
 탐색기에서 다음 파일을 더블클릭:
 ```
-scripts\win\start_server.bat
+C:\spri-newsletter\scripts\win\start_server.bat
 ```
 
 브라우저에서 접속:
@@ -112,11 +107,11 @@ http://127.0.0.1:5000
 
 ---
 
-## 7. 업데이트 받기
+## 6. 업데이트 받기
 
 메인 PC 관리자가 새 버전 알림을 보내면, 탐색기에서 다음 파일을 더블클릭:
 ```
-scripts\win\update.bat
+C:\spri-newsletter\scripts\win\update.bat
 ```
 
 내부적으로 다음을 수행합니다:
@@ -129,7 +124,7 @@ scripts\win\update.bat
 
 ---
 
-## 8. 일상 운영
+## 7. 일상 운영
 
 | 동작 | 실행 파일 |
 | --- | --- |
@@ -141,7 +136,7 @@ scripts\win\update.bat
 
 ---
 
-## 9. 문제 해결
+## 8. 문제 해결
 
 - 일반 트러블슈팅: `docs\TROUBLESHOOTING.md`
 - Google Drive 사내망 차단 관련: `docs\FAQ_DRIVE_BLOCKED.md`
