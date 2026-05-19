@@ -9,12 +9,12 @@
 ---
 
 ## 1. 사전 요구사항
-
 - Windows 10 또는 11
 - 설치 경로에 **한글이 포함되지 않아야** 합니다
   - 권장 (자동 설치 위치): `C:\spri-newsletter\`
 - 인터넷 접속 (사내 프록시 사용 시 `docs\TROUBLESHOOTING.md` 참고)
-- 메인 PC 관리자가 메일로 전달한 첨부파일 2개: `.env`, `google_credentials.json`
+- 메인PC로부터 메일 전달된 첨부파일 2개: `.env`, `google_credentials.json`
+- 메일발송용 부서공용 gmail 접속 (개인 gmail 로 발송불가)
 
 ---
 
