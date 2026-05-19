@@ -7,7 +7,10 @@ venv/
 .claude/
 
 # Credentials
-credentials/
+credentials/*
+!credentials/.gitkeep
+!credentials/google_credentials.sample.json
+!credentials/README.md
 
 # Data — 발행 결과물(.md, .csv)은 git으로 동료와 공유.
 # 개인용·런타임 파일만 무시 (data/drive_state.json, data/manual_reports/, 레거시 sqlite, FileDB lock).
@@ -33,3 +36,10 @@ build/
 
 # Local Task Scheduler backups (contains user SID)
 scripts/spri_task_backup.xml
+
+# Extra secret guards (defense-in-depth)
+*.env
+!.env.example
+credentials/google_token.json
+credentials/google_credentials.json
+credentials/google_credentials*-*.json

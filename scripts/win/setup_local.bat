@@ -1,5 +1,6 @@
 @echo off
 REM SPRi Newsletter — Portable 셋업 스크립트 (동료 PC 초기 1회 실행)
+REM 0) Git installation check (clone is done via guide; this handles update.bat pre-req)
 REM 1) UTF-8 코드페이지 활성 (한글 출력 깨짐 방지)
 REM 2) .env 생성 (없으면 .env.example 복사 + 메모장)
 REM 3) credentials\google_credentials.json 존재 확인
@@ -19,10 +20,17 @@ echo  Working directory: %ROOT%
 echo ============================================================
 echo.
 
+REM --- 0. Git installation check ---
+echo [STEP 1/6] Checking Git installation...
+call "%~dp0install_git.bat"
+if errorlevel 1 goto :fail
+for /f "tokens=2*" %%A in ('reg query "HKLM\Software\Microsoft\Windows\CurrentVersion\App Paths\git.exe" /ve 2^>nul') do set "GIT_EXE=%%B"
+if exist "%ProgramFiles%\Git\cmd\git.exe" set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
+
 REM ── 1. .env 준비 ──
 if exist ".env" goto :env_exists
 if not exist ".env.example" goto :env_example_missing
-echo [STEP 1/5] .env not found. Copying from .env.example ...
+echo [STEP 2/6] .env not found. Copying from .env.example ...
 copy /Y ".env.example" ".env" >nul
 echo          Opening .env in Notepad. Enter API keys, save, then close.
 start /WAIT notepad ".env"
@@ -33,7 +41,7 @@ echo [ERROR] .env.example not found. Package may be corrupted.
 goto :fail
 
 :env_exists
-echo [STEP 1/5] .env already exists. Skipping.
+echo [STEP 2/6] .env already exists. Skipping.
 
 :env_done
 
@@ -41,15 +49,17 @@ REM ── 2. credentials\google_credentials.json 확인 ──
 if exist "credentials\google_credentials.json" goto :cred_ok
 echo.
 echo [ERROR] credentials\google_credentials.json not found.
-echo         Get OAuth Desktop client JSON from Google Cloud Console
-echo         and place it in credentials\ folder, then re-run.
+echo         Place the google_credentials.json file you received by email
+echo         into the credentials\ folder, then re-run this script.
+echo         (Get OAuth Desktop client JSON from Google Cloud Console
+echo          if you are setting up from scratch.)
 goto :fail
 
 :cred_ok
-echo [STEP 2/5] credentials\google_credentials.json OK.
+echo [STEP 3/6] credentials\google_credentials.json OK.
 
 REM ── 3. Python 설치 확인 ──
-echo [STEP 3/5] Checking Python installation...
+echo [STEP 4/6] Checking Python installation...
 call "%~dp0install_python.bat"
 if errorlevel 1 goto :fail
 
@@ -60,7 +70,7 @@ if exist "%PYTHON_HOME%\python.exe" set "PATH=%PYTHON_HOME%;%PYTHON_HOME%\Script
 
 REM ── 4. venv 생성 + 의존성 설치 ──
 if exist ".venv\Scripts\python.exe" goto :venv_exists
-echo [STEP 4/5] .venv creating virtual environment...
+echo [STEP 5/6] .venv creating virtual environment...
 python -m venv .venv
 if errorlevel 1 goto :venv_fail
 goto :venv_ready
@@ -70,7 +80,7 @@ echo [ERROR] python -m venv failed. Ensure Python 3.11+ is in PATH.
 goto :fail
 
 :venv_exists
-echo [STEP 4/5] .venv already exists. Syncing dependencies only.
+echo [STEP 5/6] .venv already exists. Syncing dependencies only.
 
 :venv_ready
 call ".venv\Scripts\activate.bat"
@@ -88,7 +98,7 @@ goto :fail
 
 REM ── 5. First OAuth trigger ──
 echo.
-echo [STEP 5/5] Starting server for first-time OAuth consent...
+echo [STEP 6/6] Starting server for first-time OAuth consent...
 echo.
 echo          *** IMPORTANT ***
 echo          When the browser opens, log in with the TEAM Gmail account.
