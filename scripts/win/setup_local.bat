@@ -147,6 +147,25 @@ echo ============================================================
 echo(
 call "%TARGET_DIR%\scripts\win\setup_local.bat"
 set RC=%ERRORLEVEL%
+
+REM -- Cleanup: remove the bootstrap source folder (e.g. C:\spri-bootstrap\) --
+REM Safety guards:
+REM   - Only when in-repo setup succeeded (RC == 0)
+REM   - Only when SRC_DIR's leaf folder is named "spri-bootstrap"
+REM     (so we never delete Desktop or another location the user chose)
+REM   - Self-deletion: cmd holds setup_local.bat open while running, so we
+REM     spawn a detached cmd that waits ~3 seconds and then removes the folder.
+if not "%RC%"=="0" goto :bs_skip_cleanup
+for %%I in ("%SRC_DIR%") do set "SRC_NAME=%%~nxI"
+if /I not "%SRC_NAME%"=="spri-bootstrap" goto :bs_skip_cleanup
+echo(
+echo ============================================================
+echo  Cleanup: %SRC_DIR% will be removed shortly.
+echo  (No longer needed once setup is complete.)
+echo ============================================================
+start "" /B cmd /c "ping -n 4 127.0.0.1 >nul & rmdir /S /Q ""%SRC_DIR%"""
+:bs_skip_cleanup
+
 endlocal & exit /b %RC%
 
 :bs_dl_failed
