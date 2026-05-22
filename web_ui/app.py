@@ -459,11 +459,13 @@ def create_app(config: dict, db_conn) -> Flask:
         manual_articles = get_all_manual_articles(db)
         # 수동 추가 보고서 (PR3)
         manual_reports = get_all_manual_reports(db)
+        default_focus_subject = build_email_subject("focus", get_kst_date_str())
         return render_template(
             "focus.html",
             manual_articles=manual_articles,
             manual_reports=manual_reports,
             total_count=len(manual_articles),
+            default_focus_subject=default_focus_subject,
         )
 
     @app.route("/focus/translate-articles", methods=["POST"])
@@ -908,7 +910,8 @@ def create_app(config: dict, db_conn) -> Flask:
                 html_body = render_email_html(markdown, "focus", date_display)
                 logger.info("Focus 발송: markdown→HTML 렌더 사용")
             html_body = _embed_local_images_as_base64(html_body)
-            subject = build_email_subject("focus", date_str)
+            custom_subject = (data.get("custom_subject") or "").strip()
+            subject = custom_subject[:200] if custom_subject else build_email_subject("focus", date_str)
 
             creds = get_google_credentials(creds_path, token_path, ssl_verify=get_ssl_verify())
             gmail = GmailService(creds, ssl_verify=get_ssl_verify())

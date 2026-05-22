@@ -439,6 +439,38 @@ body {
   margin-top: 4px;
 }
 
+/* ── 메일 제목 입력 (선택) ── */
+.subject-input-section {
+  margin: 16px 0;
+}
+.subject-input-section label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.subject-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.subject-hint {
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.subject-hint code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
 /* ── 편집 가능 미리보기 (2-2) ── */
 .preview-editable {
   border: 2px dashed #2d5a8e;

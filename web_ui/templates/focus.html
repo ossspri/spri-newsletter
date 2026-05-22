@@ -98,6 +98,18 @@
     <button id="btn-generate-weekly" class="btn btn-primary" onclick="generateWeekly()">보고서 생성</button>
   </div>
 
+  <!-- 메일 제목 입력 (선택) -->
+  <div class="subject-input-section">
+    <label for="focus-subject">메일 제목 (선택)</label>
+    <input type="text" id="focus-subject" class="subject-input"
+           maxlength="200"
+           placeholder="비워두면 아래 기본 제목으로 발송됩니다">
+    <div class="subject-hint">
+      기본 제목: <code id="focus-subject-default">{{ default_focus_subject }}</code>
+      <br>입력 시 입력값이 우선합니다. 한 줄로 200자 이내 권장.
+    </div>
+  </div>
+
   <!-- 핵심 인사이트 입력 (2-1) -->
   <div class="insight-input-section">
     <label for="expert-insight">전문가 핵심 인사이트 (선택)</label>
@@ -619,6 +631,7 @@
     const editedHtml = previewContainer.contentEditable === 'true'
         ? (previewContainer.innerHTML || '').trim()
         : '';
+    const customSubject = (document.getElementById('focus-subject').value || '').trim();
     showLoading('보고서 발간 중...');
     try {
       const data = await apiCall('/focus/publish', {
@@ -628,6 +641,7 @@
           markdown: md,
           edited_html: editedHtml,
           recipients: Array.from(document.querySelectorAll('#focus-recipients-list .recipient-tag')).map(el => el.dataset.email),
+          custom_subject: customSubject,
         }),
       });
       const r = data.results;
