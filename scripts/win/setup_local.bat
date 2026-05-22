@@ -68,12 +68,28 @@ echo [Bootstrap 3/3] Place email-attached secret files now:
 echo    .env                       -^> %TARGET_DIR%\.env
 echo    google_credentials.json    -^> %TARGET_DIR%\credentials\google_credentials.json
 echo(
+echo  Tip: some browsers/mail clients save ".env" as "env" or "env.txt".
+echo       If that happens, just copy the file as-is; this script will rename it.
+echo(
 echo  After copying BOTH files, press any key to continue.
 echo  (Ctrl+C to abort; you can re-run this script later.)
 pause >nul
 
+REM -- Auto-rename: handle clients that strip leading dot from .env
 if not exist "%TARGET_DIR%\.env" (
-    echo [WARN] .env not found yet.
+    if exist "%TARGET_DIR%\env" (
+        echo [INFO] Found "env" without leading dot. Renaming to ".env" ...
+        ren "%TARGET_DIR%\env" ".env"
+    ) else (
+        if exist "%TARGET_DIR%\env.txt" (
+            echo [INFO] Found "env.txt". Renaming to ".env" ...
+            ren "%TARGET_DIR%\env.txt" ".env"
+        )
+    )
+)
+
+if not exist "%TARGET_DIR%\.env" (
+    echo [WARN] .env not found yet. (also tried env, env.txt)
     goto :bs_wait_secrets
 )
 if not exist "%TARGET_DIR%\credentials\google_credentials.json" (
