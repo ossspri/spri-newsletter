@@ -61,30 +61,69 @@ echo [Bootstrap 2/3] %TARGET_DIR% already cloned. Reusing.
 
 :bs_clone_done
 
-REM -- Bootstrap 3/3: wait for email-attached secret files --
+REM -- Bootstrap 3/3: pick up email-attached secrets --
+REM Strategy:
+REM   1) Look in the source folder (%~dp0, where this .bat was launched)
+REM      for .env / env / env.txt / google_credentials.json and MOVE them
+REM      into the right target locations. (Fast path: colleague dropped
+REM      all 3 attachments into C:\spri-bootstrap\ upfront.)
+REM   2) If anything still missing, enter the wait loop and ask the
+REM      colleague to drop the file into the target manually.
+
+set "SRC_DIR=%~dp0"
+if "%SRC_DIR:~-1%"=="\" set "SRC_DIR=%SRC_DIR:~0,-1%"
+
+echo(
+echo [Bootstrap 3/3] Looking for email-attached secrets in:
+echo    %SRC_DIR%
+echo(
+
+REM -- .env (and dot-stripped variants) --
+if not exist "%TARGET_DIR%\.env" (
+    if exist "%SRC_DIR%\.env" (
+        echo [INFO] Moving "%SRC_DIR%\.env" -^> "%TARGET_DIR%\.env"
+        move /Y "%SRC_DIR%\.env" "%TARGET_DIR%\.env" >nul
+    ) else if exist "%SRC_DIR%\env.txt" (
+        echo [INFO] Moving "%SRC_DIR%\env.txt" -^> "%TARGET_DIR%\.env"
+        move /Y "%SRC_DIR%\env.txt" "%TARGET_DIR%\.env" >nul
+    ) else if exist "%SRC_DIR%\env" (
+        echo [INFO] Moving "%SRC_DIR%\env" -^> "%TARGET_DIR%\.env"
+        move /Y "%SRC_DIR%\env" "%TARGET_DIR%\.env" >nul
+    )
+)
+
+REM -- google_credentials.json --
+if not exist "%TARGET_DIR%\credentials\google_credentials.json" (
+    if exist "%SRC_DIR%\google_credentials.json" (
+        echo [INFO] Moving "%SRC_DIR%\google_credentials.json" -^> "%TARGET_DIR%\credentials\google_credentials.json"
+        if not exist "%TARGET_DIR%\credentials" mkdir "%TARGET_DIR%\credentials"
+        move /Y "%SRC_DIR%\google_credentials.json" "%TARGET_DIR%\credentials\google_credentials.json" >nul
+    )
+)
+
+REM -- Fallback: wait loop if anything still missing --
 :bs_wait_secrets
+if exist "%TARGET_DIR%\.env" if exist "%TARGET_DIR%\credentials\google_credentials.json" goto :bs_chain
+
 echo(
-echo [Bootstrap 3/3] Place email-attached secret files now:
-echo    .env                       -^> %TARGET_DIR%\.env
-echo    google_credentials.json    -^> %TARGET_DIR%\credentials\google_credentials.json
+echo [Bootstrap 3/3] Some secrets still missing. Drop them now:
+if not exist "%TARGET_DIR%\.env"                                    echo    .env                       -^> %TARGET_DIR%\.env
+if not exist "%TARGET_DIR%\credentials\google_credentials.json"     echo    google_credentials.json    -^> %TARGET_DIR%\credentials\google_credentials.json
 echo(
-echo  Tip: some browsers/mail clients save ".env" as "env" or "env.txt".
-echo       If that happens, just copy the file as-is; this script will rename it.
+echo  Tip: if .env was saved as "env" or "env.txt", drop it as-is.
 echo(
-echo  After copying BOTH files, press any key to continue.
+echo  After copying, press any key to continue.
 echo  (Ctrl+C to abort; you can re-run this script later.)
 pause >nul
 
-REM -- Auto-rename: handle clients that strip leading dot from .env
+REM Late auto-rename (same logic, but in the TARGET_DIR this time)
 if not exist "%TARGET_DIR%\.env" (
     if exist "%TARGET_DIR%\env" (
         echo [INFO] Found "env" without leading dot. Renaming to ".env" ...
         ren "%TARGET_DIR%\env" ".env"
-    ) else (
-        if exist "%TARGET_DIR%\env.txt" (
-            echo [INFO] Found "env.txt". Renaming to ".env" ...
-            ren "%TARGET_DIR%\env.txt" ".env"
-        )
+    ) else if exist "%TARGET_DIR%\env.txt" (
+        echo [INFO] Found "env.txt". Renaming to ".env" ...
+        ren "%TARGET_DIR%\env.txt" ".env"
     )
 )
 
@@ -96,6 +135,8 @@ if not exist "%TARGET_DIR%\credentials\google_credentials.json" (
     echo [WARN] credentials\google_credentials.json not found yet.
     goto :bs_wait_secrets
 )
+
+:bs_chain
 
 REM -- Chain into cloned setup_local.bat (in-repo mode) --
 set SPRI_BOOTSTRAP_DONE=1
