@@ -59,6 +59,8 @@ def get_google_credentials(
     else:
         auth_request = Request()
 
+    is_ci = os.environ.get("CI") == "true"
+
     # 토큰 갱신 또는 새로 발급
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -66,9 +68,22 @@ def get_google_credentials(
                 logger.info("토큰 갱신 중...")
                 creds.refresh(auth_request)
             except Exception as e:
-                logger.warning("토큰 갱신 실패, 재인증 진행: %s", e)
+                logger.warning("토큰 갱신 실패: %s", e)
+                if is_ci:
+                    raise RuntimeError(
+                        "CI 환경에서 Google OAuth 토큰 갱신 실패 (invalid_grant). "
+                        "로컬에서 토큰을 재발급한 뒤 GOOGLE_TOKEN_B64 시크릿을 업데이트하세요.\n"
+                        "  1) 로컬: python -c \"from src.google_auth import get_google_credentials; get_google_credentials()\"\n"
+                        "  2) base64 인코딩: python -c \"import base64,pathlib; print(base64.b64encode(pathlib.Path('credentials/google_token.json').read_bytes()).decode())\"\n"
+                        "  3) GitHub → Settings → Secrets → GOOGLE_TOKEN_B64 업데이트"
+                    ) from e
                 creds = None
         if not creds or not creds.valid:
+            if is_ci:
+                raise RuntimeError(
+                    "CI 환경에서 유효한 Google OAuth 토큰이 없습니다. "
+                    "로컬에서 토큰을 발급한 뒤 GOOGLE_TOKEN_B64 시크릿을 업데이트하세요."
+                )
             if not creds_file.exists():
                 raise FileNotFoundError(
                     f"Google OAuth2 클라이언트 시크릿 파일을 찾을 수 없습니다: {credentials_path}\n"
@@ -78,10 +93,8 @@ def get_google_credentials(
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(creds_file), SCOPES
             )
-            # ssl_verify=False 시, flow 내부 token exchange도 SSL 우회
             if not ssl_verify:
                 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-                # flow 내부 OAuth2Session(=requests.Session 서브클래스)의 verify 비활성화
                 if hasattr(flow, "oauth2session"):
                     flow.oauth2session.verify = False
             creds = flow.run_local_server(port=0)
